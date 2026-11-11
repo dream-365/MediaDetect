@@ -4,7 +4,7 @@ MediaDetect 是一个无状态、只读的媒体类型检测库与 CLI。输入�
 
 它不创建索引、不写 SQLite、不写缓存或临时文件，也不会修改输入目录中的任何文件。
 
-- 当前版本：`0.1.1`
+- 当前版本：`0.2.0`
 - JSON Schema 版本：`"1"`
 - 最低 Go 版本：`1.27.1`
 - License：[MIT](LICENSE)
@@ -12,7 +12,7 @@ MediaDetect 是一个无状态、只读的媒体类型检测库与 CLI。输入�
 ## 安装
 
 ```bash
-go install github.com/dream-365/MediaDetect/cmd/mediadetect@v0.1.1
+go install github.com/dream-365/MediaDetect/cmd/mediadetect@v0.2.0
 ```
 
 `go install` 会把二进制装到 `$(go env GOPATH)/bin/mediadetect`，不需要手写模块代理转义。
@@ -56,6 +56,26 @@ func main() {
 ```
 
 `Options` 的零值等同于 CLI 的 `--probe=auto --match=auto`。库调用不会读取环境变量，TMDB key、语言和 HTTP client 都通过 `TMDBOptions` 显式传入。
+
+## 项目结构
+
+```text
+.
+├── cmd/mediadetect/     # CLI：main、config、args、input、output、help
+├── internal/
+│   ├── collect/         # 只读遍历与探测（不对外）
+│   └── llm/             # LLM 查询扩展（不对外）
+├── parser/              # 公开：文件名解析
+├── probe/               # 公开：ffprobe/exiftool 封装
+├── tmdb/                # 公开：TMDB 客户端
+├── matcher/             # 公开：匹配评分
+├── options.go           # 根包公开配置与契约类型
+├── result.go            # JSON 结果类型
+├── errors.go            # 错误码与错误类型
+└── docs/                # Spec 与质量报告
+```
+
+公开边界：根包 `mediadetect`、`parser`、`probe`、`tmdb`、`matcher` 可被下游导入；`internal/collect`、`internal/llm` 受 Go `internal` 规则约束，只能由本模块使用。
 
 ## 快速开始
 
@@ -271,7 +291,7 @@ mediadetect --pretty "/path/to/Movie/Inception.2010.mkv" \
 
 ## 下游集成
 
-任何 Go 项目都可以通过 `require github.com/dream-365/MediaDetect vX.Y.Z` 使用本模块。调用方通常只依赖根包 `mediadetect`，也可以直接使用 `parser`、`probe`、`tmdb`、`matcher`、`llm` 或 `collect`。本仓库不包含任何下游项目的包装代码。
+任何 Go 项目都可以通过 `require github.com/dream-365/MediaDetect vX.Y.Z` 使用本模块。公开包为根包 `mediadetect`、`parser`、`probe`、`tmdb` 和 `matcher`；`collect`、`llm` 自 v0.2.0 起位于 `internal/`，只能由本模块与 CLI 使用。本仓库不包含任何下游项目的包装代码。
 
 ## License 与 TMDB
 

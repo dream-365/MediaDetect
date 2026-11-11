@@ -8,6 +8,19 @@ updated_at: 2026-11-11
 
 # Changelog: SPEC-001 MediaDetect 媒体检测库与 CLI
 
+## [2026-11-11] - SPEC-002 包边界替代
+
+- **修改类型**: Changed
+- **影响范围**: §2.1 G2；§3.2；§4.4.1；§4.4.1.1；`tasks.md` 的 `spec_sha256`
+- **变更原因**: SPEC-002 将 `collect`、`llm` 移入 `internal/`，并让根包自行定义公共类型。按 CLAUDE.md，先把本 Spec 状态回退为 `In Review`，更新 `updated_at`，记录变更并写入替代说明，再恢复 `Approved`；回退期间不修改生产代码。
+- **具体内容**:
+  - §2.1 G2 的包清单改为 `internal/llm`、`internal/collect`，其余验收不变
+  - §3.2 的模块布局与 `collect` 位置改由 SPEC-002 §4.1 定义；`llm`、`collect` 标注为内部包
+  - §4.4.1 的 `Resolver` 类型改为根包 `QueryResolver`；`Prober` 返回根包 `MediaInfo`；删除 `type MediaInfo = probe.Info` 与类型别名表述，改为根包定义并在边界显式转换；新增 `ErrProbeUnavailable` 错误契约
+  - §4.4.1.1 标注 `collect` 不再是公开包，公开契约由 SPEC-002 §4.7 的迁移说明替代
+  - 重算 `tasks.md` 的 `spec_sha256`，使其与修订后的 `spec.md` 一致
+  - 历史注记：v0.1.1 条目中的“`SPEC-002` → `SPEC-001`”是编号整理前的旧编号，指当前 SPEC-001；当前仓库的 SPEC-002 是包边界 Spec，与那次改名无关
+
 ## [2026-11-11] - v0.1.1 文档整理与版本注入
 
 - **修改类型**: Changed / Fixed

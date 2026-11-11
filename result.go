@@ -1,73 +1,11 @@
 package mediadetect
 
-import (
-	"context"
-	"net/http"
-
-	"github.com/dream-365/MediaDetect/matcher"
-	"github.com/dream-365/MediaDetect/probe"
-)
-
 // SchemaVersion is the JSON contract version. Additive changes keep "1";
 // removing or renaming fields requires a major bump.
 const SchemaVersion = "1"
 
 // TMDBAttribution is emitted whenever TMDB was queried.
 const TMDBAttribution = "This product uses the TMDB API but is not endorsed or certified by TMDB."
-
-// ProbeMode controls ffprobe/exiftool usage.
-type ProbeMode string
-
-const (
-	ProbeAuto ProbeMode = "auto"
-	ProbeOff  ProbeMode = "off"
-)
-
-// MatchMode controls TMDB matching.
-type MatchMode string
-
-const (
-	MatchAuto MatchMode = "auto"
-	MatchOn   MatchMode = "on"
-	MatchOff  MatchMode = "off"
-)
-
-// TMDBOptions configures the TMDB adapter.
-type TMDBOptions struct {
-	APIKey         string
-	BaseURL        string
-	Language       string
-	MaxQueries     int
-	CandidateLimit int
-	HTTPClient     *http.Client
-	CacheLimit     int
-}
-
-// Prober reads technical metadata. Probe=off injects a collector sentinel
-// internally; external callers normally leave this nil.
-type Prober interface {
-	Probe(ctx context.Context, path string) (MediaInfo, error)
-}
-
-// MediaInfo is the technical subset collected for each file.
-type MediaInfo = probe.Info
-
-// QueryResolver is the optional LLM query expander.
-type QueryResolver = matcher.QueryResolver
-
-// Options controls one Detect call. The zero value means auto/auto with the
-// documented defaults.
-type Options struct {
-	ProbeMode     ProbeMode
-	MatchMode     MatchMode
-	TMDB          TMDBOptions
-	LLMFallback   bool
-	Resolver      QueryResolver
-	MaxDepth      *int
-	MaxFiles      *int
-	IncludeHidden bool
-	Prober        Prober
-}
 
 // Result is the single JSON object returned by Detect.
 type Result struct {

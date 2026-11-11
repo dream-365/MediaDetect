@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/text/unicode/norm"
 
-	"github.com/dream-365/MediaDetect/collect"
+	"github.com/dream-365/MediaDetect/internal/collect"
 	"github.com/dream-365/MediaDetect/probe"
 )
 
@@ -82,7 +82,8 @@ func Detect(ctx context.Context, inputPath string, opts Options) (Result, error)
 			return probe.Info{}, collect.ErrProbeSkipped
 		}
 		if opts.Prober != nil {
-			return opts.Prober.Probe(ctx, path)
+			mi, err := opts.Prober.Probe(ctx, path)
+			return probe.Info(mi), err
 		}
 		return probe.Probe(ctx, path)
 	}

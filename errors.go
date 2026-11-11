@@ -1,5 +1,12 @@
 package mediadetect
 
+import "github.com/dream-365/MediaDetect/probe"
+
+// ErrProbeUnavailable reports that the configured prober could not read
+// technical metadata. It is the same sentinel as probe.ErrUnavailable, so
+// errors.Is works with either value.
+var ErrProbeUnavailable = probe.ErrUnavailable
+
 // Top-level error codes. Match infrastructure failures live in Match.Error
 // instead and are not returned as a top-level error.
 const (

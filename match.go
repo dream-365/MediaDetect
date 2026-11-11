@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dream-365/MediaDetect/collect"
+	"github.com/dream-365/MediaDetect/internal/collect"
 	"github.com/dream-365/MediaDetect/matcher"
 	"github.com/dream-365/MediaDetect/tmdb"
 )

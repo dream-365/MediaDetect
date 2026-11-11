@@ -52,7 +52,7 @@ MediaDetect 把这些能力收敛为一个独立 Go module 和一个无状态 CL
 ### 2.1 目标
 
 * **G1 - 无状态 CLI 契约（架构/接口）**：`mediadetect <path>` 和 `mediadetect -` 每次只输出一个 JSON 对象；不创建索引目录、不写 SQLite、不写缓存或临时文件；成功、降级、未匹配和错误都有稳定字段与退出码。验收方式：CLI golden 测试覆盖文件、目录、stdin、缺少参数、路径不存在、无 TMDB key、`--match=off` 七种场景；运行前后对输入树做内容/mtime/inode 快照，断言零写入。
-* **G2 - 独立 detect 模块（架构/代码）**：公开仓库与 Go module `github.com/dream-365/MediaDetect`（仓库名 `MediaDetect`，MIT License）拥有自己的 `go.mod`，包含 `parser`、`probe`、`tmdb`、`matcher`、`llm`、`collect`、根包 `mediadetect` 和 `cmd/mediadetect`；模块不依赖任何私有项目；module path 大小写必须与仓库路径一致。验收方式：`go test ./...` 通过；`go list -deps ./cmd/mediadetect` 不包含私有依赖；`go mod tidy -diff` 无差异；干净缓存下 `GOWORK=off go mod download github.com/dream-365/MediaDetect@vX.Y.Z` 成功（代理路径转义为 `github.com/dream-365/!media!detect`）；`go install github.com/dream-365/MediaDetect/cmd/mediadetect@vX.Y.Z` 可用。
+* **G2 - 独立 detect 模块（架构/代码）**：公开仓库与 Go module `github.com/dream-365/MediaDetect`（仓库名 `MediaDetect`，MIT License）拥有自己的 `go.mod`，包含 `parser`、`probe`、`tmdb`、`matcher`、`internal/llm`、`internal/collect`、根包 `mediadetect` 和 `cmd/mediadetect`；模块不依赖任何私有项目；module path 大小写必须与仓库路径一致。包位置以 SPEC-002 §4.1 为准；G2 的其他验收不变。验收方式：`go test ./...` 通过；`go list -deps ./cmd/mediadetect` 不包含私有依赖；`go mod tidy -diff` 无差异；干净缓存下 `GOWORK=off go mod download github.com/dream-365/MediaDetect@vX.Y.Z` 成功（代理路径转义为 `github.com/dream-365/!media!detect`）；`go install github.com/dream-365/MediaDetect/cmd/mediadetect@vX.Y.Z` 可用。
 * **G3 - 本地媒体类型识别（质量/指标）**：在运行前冻结的人工标注样本（≥100 个真实文件/目录）上，`movie`、`tv_episode`、`tv_season`、`tv_series`、`non_feature`、`auxiliary`、`other` 的总体准确率 ≥95%（不含附录 B 的已知限制桶），并分别报告每类 precision/recall；含已知限制桶的准确率也必须写入报告，但不作为门槛。映射契约测试：4.5.1 每条映射规则有单元测试；parser 已识别的显式剧集标记（`SxxExx`、中文“第 N 集”）在 type 映射上召回率 100%——这是契约测试，不作为真实世界准确率指标。4.5.1.1 的 parser 修正必须覆盖辅助类型优先、`sample`/`oad` 词边界、`ova` 误报、`1x01`/`S01.E01` 和全角斜杠/分数标题；未修正的裸数字集号、`S01E01E02` 等列入附录 B。验收方式：`docs/quality/SPEC-001/calibration-report.md` 给出冻结样本清单、混淆矩阵、逐类样本数、已知限制清单和错误清单；同时用 ≥60 条基于 parser 测试语料和目录 fixture 的回归测试。
 * **G4 - 匹配与 IMDb ID（质量/指标）**：在冻结的 225 个 feature 文件基线上（文件级分母），high 置信匹配率 ≥86.2%（基线 194/225），high+medium 合计 ≥90%（基线 207/225 = 92.0%）；组级口径（221 部）单独报告 high ≥86.9%、high+medium ≥94.6%，不得与文件级数字混用。对 high 置信匹配，`imdb_id` 非空率 ≥95%；剧集文件不得被发送到 TMDB 电影搜索。验收方式：固定样本 + mock TMDB 服务（`--tmdb-base-url` 或库级 `TMDBOptions.BaseURL`）；统计 high/medium 占比、`imdb_id` 缺失清单和搜索请求的媒体类型断言；与历史基线结果做对照并给出允许差异；真实样本报告归档。不得通过人工映射或新增匹配规则达到阈值；95% 及以上属于后续匹配校准 spec 的目标。
 * **G5 - 降级与隐私（可靠性/安全）**：对电影文件，`--match=auto` 且无 `TMDB_API_KEY` 时，本地检测仍返回 `ok=true`、`match.status=disabled`，退出 0；`--match=off` 时零 HTTP 请求（库级测试注入计数 `http.RoundTripper`，CLI 测试用 `--tmdb-base-url` 指向 mock 服务器）；`--match=on` 且缺少 key 或 TMDB 不可达时，本地结果仍输出，电影文件的 `match.status=error`，退出 4；纯剧集/附属输入不因缺少 TMDB key 失败，类型为 `not_applicable`。JSON、stderr 和错误信息中不出现 API key、Authorization、原始 URL query 或响应 body。验收方式：无 key 测试、mock 网络失败测试、key/query 脱敏测试、零请求 transport 计数测试。
@@ -98,14 +98,14 @@ graph LR
 
 ### 3.2 核心模块职责
 
-* **`MediaDetect` module**：位于仓库根目录，module path `github.com/dream-365/MediaDetect`，拥有自己的 `go.mod`。包含 `parser`、`probe`、`tmdb`、`matcher`、`llm`、`collect`、根包 `mediadetect` 和 `cmd/mediadetect`。
+* **`MediaDetect` module**：位于仓库根目录，module path `github.com/dream-365/MediaDetect`，拥有自己的 `go.mod`。包含 `parser`、`probe`、`tmdb`、`matcher`、`internal/llm`、`internal/collect`、根包 `mediadetect` 和 `cmd/mediadetect`。模块布局由 SPEC-002 §4.1 定义。
 * **`mediadetect` 根包**：提供 `Options`、`Detect(ctx, path, Options)`、`Result` 和错误类型；负责本地类型映射、目录聚合、`GroupKey` 去重、匹配后按 `best.Movie.ID` union、匹配状态优先级、`imdb_id` 补齐和 JSON 契约。对外不暴露内部实现细节。
-* **`collect`**：只读遍历、`parser.Parse`、`probe.Probe`、`GroupKey` 计算，返回 `CollectedFile` 列表、`Seen` 集合和 `Counts`；不依赖索引或数据库。契约见 4.4.1.1：`CollectedFile` 必须包含 `RelPath`、`SizeBytes`、`Mtime`、`Hints`、`ProbeStatus`、`DurationSec`、`GroupKey`；`Seen` 是本次遍历成功返回的相对路径集合；`Counts` 区分 `FilesSeen`、`ProbeFailed`、`Unreadable`、`SkippedHidden`、`SkippedSymlinks`、`Truncated`。root 不可读必须返回 error，不能返回空列表。
+* **`internal/collect`**（SPEC-002 起为内部包，位置见 SPEC-002 §4.1）：只读遍历、`parser.Parse`、`probe.Probe`、`GroupKey` 计算，返回 `CollectedFile` 列表、`Seen` 集合和 `Counts`；不依赖索引或数据库。契约见 4.4.1.1：`CollectedFile` 必须包含 `RelPath`、`SizeBytes`、`Mtime`、`Hints`、`ProbeStatus`、`DurationSec`、`GroupKey`；`Seen` 是本次遍历成功返回的相对路径集合；`Counts` 区分 `FilesSeen`、`ProbeFailed`、`Unreadable`、`SkippedHidden`、`SkippedSymlinks`、`Truncated`。root 不可读必须返回 error，不能返回空列表。
 * **`parser`**：从相对路径拆出标题候选、年份候选、角色、edition、分辨率、来源、编码、发布组和季集标记；按 4.5.1.1 修正五项既有缺陷，并提供 `Hints.NonFeatureReason` 字段。
 * **`probe`**：ffprobe 优先、exiftool 兜底读取时长、分辨率与编码；只依赖标准库和外部二进制。
 * **`tmdb`**：TMDB 搜索、详情、别名、进程内缓存、限流退避和错误脱敏；`Details` 返回 runtime 与 `imdb_id`。
 * **`matcher`**：用标题候选、年份、时长和别名评分，输出候选、置信度和领先分差；查询扩展包括确定性的繁简/紧凑变体和可选的 LLM 召回。
-* **`llm`**：读取 `DEEPSEEK_API_KEY`，只生成额外检索词，不直接判定条目。
+* **`internal/llm`**（SPEC-002 起为内部包，位置见 SPEC-002 §4.1）：读取 `DEEPSEEK_API_KEY`，只生成额外检索词，不直接判定条目。
 * **`cmd/mediadetect`**：解析参数与 stdin，读取 `TMDB_API_KEY`/`DEEPSEEK_API_KEY`，调用根包，输出单个 JSON 对象，映射退出码；不包含分类或评分规则。
 * **下游集成**：下游项目通过 `require github.com/dream-365/MediaDetect vX.Y.Z` 使用本模块；本仓库不包含下游的类型别名、包装或索引代码。
 
@@ -584,6 +584,8 @@ graph LR
 
 #### 4.4.1 Go 公共 API
 
+> **替代说明（SPEC-002）**：本节的 `Resolver` 类型、`MediaInfo` 定义、`Prober` 返回类型和 `ErrProbeUnavailable` 错误契约已由 SPEC-002 §4.2/§4.3 更新；其余契约继续有效。
+
 module path：`github.com/dream-365/MediaDetect`；根包名：`mediadetect`。
 
 ```go
@@ -619,18 +621,29 @@ type Options struct {
     MatchMode     MatchMode
     TMDB          TMDBOptions
     LLMFallback   bool
-    Resolver      matcher.QueryResolver // 可选；nil 且 LLMFallback 时由 CLI 注入 llm.FromEnv()
+    Resolver      QueryResolver // 可选；nil 且 LLMFallback 时由 CLI 注入 internal/llm.FromEnv()
     MaxDepth      *int                  // nil=默认 8；*0=不限制
     MaxFiles      *int                  // nil=默认 5000；*0=不限制
     IncludeHidden bool
     Prober        Prober
 }
 
+type QueryResolver interface {
+    Queries(ctx context.Context, filename string, titles []string, year, runtimeSec int) ([]string, error)
+}
+
 type Prober interface {
     Probe(ctx context.Context, path string) (MediaInfo, error)
 }
 
-type MediaInfo = probe.Info
+// MediaInfo 字段与 probe.Info 一致；根包在边界处显式转换。
+type MediaInfo struct {
+    DurationSec int
+    Resolution  string
+    Codec       string
+}
+
+var ErrProbeUnavailable = probe.ErrUnavailable
 
 type Error struct {
     Code    string
@@ -648,9 +661,13 @@ func Detect(ctx context.Context, path string, opts Options) (Result, error)
 * `TMDBOptions.BaseURL/Language` 为空时沿用 `MediaDetect/tmdb.New` 的默认值；`HTTPClient=nil` 时使用 10s 超时的默认 client；`CacheLimit` 控制三个进程内 map 的条数上限，超出后停止新增（不淘汰已有条目），避免无界增长。
 * `Resolver` 由 CLI 在 `--llm-fallback` 时注入 `llm.FromEnv()`；`Detect` 不直接读环境变量。`LLMFallback=true` 且 `Resolver=nil` 时不启用 LLM，追加 `match.llm_key_missing` warning 并继续，不返回顶层错误。
 * `Detect` 成功时返回非零 `Result` 和 `nil` error；路径/输入错误时返回零 `Result` 和 `*Error`。匹配失败、无 key、未匹配、剧集不适用都属于成功结果，通过 `match.status` 和 `warnings` 表达；只有存在电影文件且 `MatchOn` 的匹配基础设施失败会同时设置 `match.status=error` 并让 CLI 退出 4；context 取消优先返回 `ERR_CANCELED`。
-* 根包不暴露 `MediaDetect` 模块的内部实现细节；`MediaInfo` 是唯一跨边界的技术元数据结构。`MediaInfo`/`probe.Info` 通过类型别名统一，避免根包与 collect 循环依赖。
+* 根包不暴露 `MediaDetect` 模块的内部实现细节；`MediaInfo` 是唯一跨边界的技术元数据结构。根包自行定义 `MediaInfo`，字段与 `probe.Info` 一致，并在根包边界显式转换；不再使用类型别名。该调整由 SPEC-002 §4.4.1 替代。
+* `Options.Resolver` 的类型为根包 `QueryResolver`，方法集与 `matcher.QueryResolver` 一致；外部实现无需导入 `matcher`。
+* `ErrProbeUnavailable` 是根包错误契约，与 `probe.ErrUnavailable` 为同一 sentinel；外部 `Prober` 返回该错误时，根包以 `errors.Join(ErrProbeUnavailable, err)` 保留 `errors.Is` 语义。
 
 #### 4.4.1.1 collect 契约
+
+> **替代说明（SPEC-002 §4.7）**：自 v0.2.0 起 `collect` 移入 `internal/collect`，不再是公开包；本节的契约保留为实现参考，不构成对外 API 承诺。下游迁移见 SPEC-002 §4.7。
 
 ```go
 package collect

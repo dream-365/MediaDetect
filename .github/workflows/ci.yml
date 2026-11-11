@@ -39,3 +39,35 @@ jobs:
             echo "private dependency detected"
             exit 1
           fi
+      - name: boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          public_count=$(go list ./... | grep -v '/internal/' | wc -l | tr -d ' ')
+          test "$public_count" -eq 6
+          internal_count=$(go list ./... | grep '/internal/' | wc -l | tr -d ' ')
+          test "$internal_count" -eq 2
+          if go list -f '{{.ImportPath}}: {{join .Imports " "}}' ./parser ./probe ./tmdb ./matcher | grep '/internal/'; then
+            echo "domain package imports internal"
+            exit 1
+          fi
+          if grep -Eq '"github.com/dream-365/MediaDetect/(probe|matcher)"' result.go; then
+            echo "result.go imports probe/matcher"
+            exit 1
+          fi
+
+          tmp=$(mktemp -d)
+          trap 'rm -rf "$tmp"' EXIT
+          cd "$tmp"
+          go mod init example.com/internal-probe
+          go mod edit -replace "github.com/dream-365/MediaDetect=${GITHUB_WORKSPACE}"
+          go mod edit -require github.com/dream-365/MediaDetect@v0.2.0
+
+          for pkg in collect llm; do
+            printf '%s\n' 'package main' '' "import _ \"github.com/dream-365/MediaDetect/internal/${pkg}\"" '' 'func main() {}' > main.go
+            if output=$(GOFLAGS=-mod=mod go build ./... 2>&1); then
+              echo "external import of internal/${pkg} unexpectedly succeeded"
+              exit 1
+            fi
+            printf '%s\n' "$output" | grep -q 'use of internal package'
+          done

@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"sort"
 
-	"github.com/dream-365/MediaDetect/collect"
+	"github.com/dream-365/MediaDetect/internal/collect"
 )
 
 var (

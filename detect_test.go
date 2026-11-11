@@ -218,8 +218,8 @@ func TestDetectProbeModes(t *testing.T) {
 
 	failing := Options{
 		MatchMode: MatchOff,
-		Prober: proberFunc(func(context.Context, string) (probe.Info, error) {
-			return probe.Info{}, errors.New("boom")
+		Prober: proberFunc(func(context.Context, string) (MediaInfo, error) {
+			return MediaInfo{}, errors.New("boom")
 		}),
 	}
 	failed := detectOK(t, root, failing)
@@ -229,8 +229,8 @@ func TestDetectProbeModes(t *testing.T) {
 
 	unavailable := Options{
 		MatchMode: MatchOff,
-		Prober: proberFunc(func(context.Context, string) (probe.Info, error) {
-			return probe.Info{}, errors.Join(probe.ErrUnavailable, errors.New(`exec: "ffprobe": executable file not found in $PATH`))
+		Prober: proberFunc(func(context.Context, string) (MediaInfo, error) {
+			return MediaInfo{}, errors.Join(probe.ErrUnavailable, errors.New(`exec: "ffprobe": executable file not found in $PATH`))
 		}),
 	}
 	missing := detectOK(t, root, unavailable)
@@ -239,9 +239,9 @@ func TestDetectProbeModes(t *testing.T) {
 	}
 }
 
-type proberFunc func(context.Context, string) (probe.Info, error)
+type proberFunc func(context.Context, string) (MediaInfo, error)
 
-func (f proberFunc) Probe(ctx context.Context, path string) (probe.Info, error) {
+func (f proberFunc) Probe(ctx context.Context, path string) (MediaInfo, error) {
 	return f(ctx, path)
 }
 
