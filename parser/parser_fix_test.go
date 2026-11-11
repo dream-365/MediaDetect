@@ -5,9 +5,8 @@ import (
 	"testing"
 )
 
-// TestParserFixes covers the four explicit behavior changes in SPEC-002
-// 4.5.1.1. Every case is a before/after fixture used by mstruct and
-// mediadetect.
+// TestParserFixes covers the parser behavior changes in SPEC-001 4.5.1.1.
+// Every case is a before/after fixture used by the parser contract.
 func TestFullWidthSlashKeptInTitle(t *testing.T) {
 	h := Parse("剧场版.示例片1／2：示例副标题！.1991.日语中字.mkv")
 	joined := strings.Join(h.TitleCandidates, " | ")

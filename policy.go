@@ -9,7 +9,7 @@ type matchPlan struct {
 	message string
 }
 
-// planMatch implements the SPEC-002 4.3.1/4.5.2 priority: local type first,
+// planMatch implements the SPEC-001 4.3.1/4.5.2 priority: local type first,
 // then match mode and key availability, and only then an actual match run.
 func planMatch(mode MatchMode, key string, hasMovies bool) matchPlan {
 	if !hasMovies {

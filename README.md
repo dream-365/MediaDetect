@@ -4,7 +4,7 @@ MediaDetect 是一个无状态、只读的媒体类型检测库与 CLI。输入�
 
 它不创建索引、不写 SQLite、不写缓存或临时文件，也不会修改输入目录中的任何文件。
 
-- 当前版本：`0.1.0`
+- 当前版本：`0.1.1`
 - JSON Schema 版本：`"1"`
 - 最低 Go 版本：`1.27.1`
 - License：[MIT](LICENSE)
@@ -12,7 +12,7 @@ MediaDetect 是一个无状态、只读的媒体类型检测库与 CLI。输入�
 ## 安装
 
 ```bash
-go install github.com/dream-365/MediaDetect/cmd/mediadetect@v0.1.0
+go install github.com/dream-365/MediaDetect/cmd/mediadetect@v0.1.1
 ```
 
 `go install` 会把二进制装到 `$(go env GOPATH)/bin/mediadetect`，不需要手写模块代理转义。
@@ -266,12 +266,12 @@ mediadetect --pretty "/path/to/Movie/Inception.2010.mkv" \
 - `Show S01`、`Show.Season.1` 这类目录名当前按 `tv_series` 处理；只识别 `S01`、`Season 1`、`第 N 季`。
 - 无季集上下文的 `NxM` 数字 token 仍可能有歧义。
 - 中英文双命名且未匹配成功时，`distinct_movies` 可能多算。
-- 导演剪辑版/重映条目的年份差异、正确 best 但 margin 过低的候选，按既有 matcher 规则处理，详见 [SPEC-002 附录 B](docs/specs/SPEC-002-media-type-detection/spec.md#附录-b已知限制)。
+- 导演剪辑版/重映条目的年份差异、正确 best 但 margin 过低的候选，按既有 matcher 规则处理，详见 [SPEC-001 附录 B](docs/specs/SPEC-001-media-type-detection/spec.md#附录-b已知限制)。
 - TMDB 剧集匹配尚未实现；剧集只做本地识别。
 
-## 与 mstruct 的关系
+## 下游集成
 
-MStruct 通过 `require github.com/dream-365/MediaDetect v0.1.0` 消费本模块；其 `internal/parser`、`internal/probe`、`internal/tmdb`、`internal/matcher`、`internal/llm` 是类型别名薄包装，`internal/scanner` 使用本模块的 `collect` 做只读遍历，索引写入仍留在 MStruct。MediaDetect 本身不依赖 `github.com/dream-365/MStruct`。
+任何 Go 项目都可以通过 `require github.com/dream-365/MediaDetect vX.Y.Z` 使用本模块。调用方通常只依赖根包 `mediadetect`，也可以直接使用 `parser`、`probe`、`tmdb`、`matcher`、`llm` 或 `collect`。本仓库不包含任何下游项目的包装代码。
 
 ## License 与 TMDB
 

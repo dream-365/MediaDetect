@@ -15,8 +15,8 @@ import (
 	"github.com/dream-365/MediaDetect/probe"
 )
 
-// detectSkipNames are always skipped for mediadetect. mstruct keeps its own
-// narrower list when it calls collect directly.
+// detectSkipNames are always skipped by the CLI. Callers that use collect
+// directly can pass their own narrower SkipNames list.
 var detectSkipNames = []string{
 	".mstruct",
 	"@eaDir",

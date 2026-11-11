@@ -17,7 +17,7 @@ import (
 // tool that runs but fails is a probe failure, not an unavailable one.
 var ErrUnavailable = errors.New("probe tools unavailable")
 
-// Info is the technical subset mstruct stores on a version.
+// Info is the technical subset MediaDetect exposes for a file.
 type Info struct {
 	DurationSec int
 	Resolution  string

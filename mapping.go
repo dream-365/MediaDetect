@@ -14,7 +14,7 @@ type fileType struct {
 	auxKind    string
 }
 
-// mapFile implements the SPEC-002 4.5.1 table. It adds no new classification
+// mapFile implements the SPEC-001 4.5.1 table. It adds no new classification
 // rules: every decision comes from the parser's role and episode hints.
 func mapFile(h parser.Hints) fileType {
 	switch h.RoleHint {

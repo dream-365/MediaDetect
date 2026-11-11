@@ -1,10 +1,10 @@
-# SPEC-002 MediaDetect 校准报告
+# SPEC-001 MediaDetect 校准报告
 
 - 日期：2026-11-11
-- Spec：`docs/specs/SPEC-002-media-type-detection/spec.md`（Approved）
+- Spec：`docs/specs/SPEC-001-media-type-detection/spec.md`（Approved）
 - 冻结样本：`parser/testdata/filenames.txt`（公开版本为合成/匿名 fixture）
 - 样本哈希：`384168a05d6153950d1e0431278da1061f187df4f34e5f30920c2dcc1f2e989f`
-- 样本来源：SPEC-001 Rollout 0 采集的 231 条文件名（228 视频 + 3 字幕），2026-11-10 冻结；原始语料与绝对路径只保留在 MStruct 私有仓库，公开仓库使用同计数、同结构的合成 fixture
+- 样本来源：历史校准批次采集的 231 条文件名（228 视频 + 3 字幕），2026-11-10 冻结；原始语料与绝对路径不进入公开仓库，公开仓库使用同计数、同结构的合成 fixture
 - 运行环境：2026-11-11 报告首次生成时 SMB 根未挂载；后续第 9 节完成 10 个真实文件抽测。第 2–7 节的统计基于脱敏前的冻结真实语料，公开版本不包含原始片名
 
 ## 1. 口径与限制
@@ -12,10 +12,10 @@
 | 项目 | 说明 |
 | --- | --- |
 | 类型样本 | 231 条真实文件名，文件级；不含目录聚合真实样本 |
-| 已知限制桶 | 3 条裸数字集号样本 `Example.Documentary.01/02/03`（匿名化），按 SPEC-002 附录 B 不计入准确率门槛，但单独报告 |
-| 匹配样本 | 沿用 SPEC-001 Rollout 0 的 225 个 feature 文件基线；本次未重跑真实 TMDB |
+| 已知限制桶 | 3 条裸数字集号样本 `Example.Documentary.01/02/03`（匿名化），按 SPEC-001 附录 B 不计入准确率门槛，但单独报告 |
+| 匹配样本 | 沿用历史 225 个 feature 文件基线；本次未重跑真实 TMDB |
 | 匹配 mock | `TestDetectMockMatchAndIMDb`、`TestDetectCandidatesOnlyBestHasIMDb` 等覆盖 `imdb_id`、候选与零请求契约 |
-| 目录聚合 | `TestAggregateRows` 覆盖 SPEC-002 4.5.2 的 9 行 fixture，不代表真实目录准确率 |
+| 目录聚合 | `TestAggregateRows` 覆盖 SPEC-001 4.5.2 的 9 行 fixture，不代表真实目录准确率 |
 
 ## 2. 本地类型：混淆矩阵
 
@@ -67,9 +67,9 @@
 
 ## 5. 电影匹配与 IMDb（G4）
 
-沿用 SPEC-001 Rollout 0 阶段 B3 的冻结基线（同一批 225 个 feature 文件）：
+沿用历史 225 文件冻结基线（同一批 225 个 feature 文件）：
 
-| 指标 | 基线 | SPEC-002 门槛 | 本次结论 |
+| 指标 | 基线 | SPEC-001 门槛 | 本次结论 |
 | --- | ---: | ---: | --- |
 | high（文件级，225） | 194 / 225 = 86.2% | ≥86.2% | 沿用基线，本次未复测 |
 | high + medium（文件级，225） | 207 / 225 = 92.0% | ≥90% | 沿用基线，本次未复测 |
@@ -114,7 +114,7 @@ go test . -run 'TestDetectMockMatchAndIMDb|TestDetectUnionByMovieID|TestDetectCa
 
 1. 冻结文件名样本上，本地类型准确率超过 G3 的 95% 门槛；3 条裸数字剧集是唯一已知限制错误。
 2. 目录聚合只经过 fixture 契约测试，真实目录样本待 SMB 根挂载后补测。
-3. 匹配与 IMDb 的回归下限沿用 SPEC-001 B3 基线，本次未重跑真实 TMDB，因此不把基线数字表述为本次实测；真实 `imdb_id` 非空率待补测。
+3. 匹配与 IMDb 的回归下限沿用历史基线，本次未重跑真实 TMDB，因此不把基线数字表述为本次实测；真实 `imdb_id` 非空率待补测。
 4. 本报告不把 mock/fixture 结果冒充真实世界准确率；未测项明确标为待补。
 
 ## 9. SMB 恢复后的 10 部电影抽测
@@ -159,7 +159,6 @@ HTTPS_PROXY=http://127.0.0.1:1087 mediadetect "<file>"
 | P1 | root 级 `WalkDir` 错误不再被当成空目录；scanner 在存在不可读项时跳过 `MarkMissing`；未变化文件重新出现时恢复 `active` | `TestCollectRootWalkFailure`、`TestScanReactivatesUnchangedFile` |
 | P2 | 展示层剥离 `S01.E01`/`1x01`/CJK 集号；`tv_season` 用目录季号补齐 `summary.seasons`；probe 使用 WalkDir 原始路径，避免 NFD 路径被 NFC 重建 | `TestDisplayTitlesStripEpisodeForms`、`TestSeasonDirectoryFillsSummary` |
 | P3 | `probe.unavailable` 仅在两个工具都不可执行时产生；`--verbose` 输出 best；`evidence` 分数三位小数；无实际 TMDB 请求时 `attribution=null`；`--pretty` 作用于错误与 version；`1x01` 误报防护；NUL 路径错误码；探测后取消检查 | `TestProbeUnavailableOnlyWhenBothToolsMissing`、`TestCLIMockTMDB`、`TestDetectEvidenceRoundsScores`、`TestDetectAttributionRequiresRequest`、`TestCLIPrettyAppliesToErrorsAndVersion`、`TestEpisodeXFalsePositives`、`TestDetectNULPathIsInvalid`、`TestCollectCancelAfterProbe` |
-| 集成 | mstruct 的 TMDB wrapper 保持 20s 单请求超时；README 说明不发布独立仓库，外部 `go install` 不支持 | `internal/tmdb` contract 测试、README |
 | Spec 遗留 | parser 第五项修正保留 `/`，`示例片1／2` 标题候选变为 `示例片1/2`；长标题生成去前缀/截断搜索变体；matcher `normalizeTitle` 用 NFKC 统一 `½` 与 `1/2`；union 规则改为 union 后 `distinct_movies>1` 才 `multiple`；顶层 `error` 明确仅 `ok=false` 时出现 | `TestFullWidthSlashKeptInTitle`、`TestDetectFullWidthSlashQueryKeepsSlash`、`TestUnicodeFractionTitleNormalization`、`TestDetectUnionByMovieID` |
 
 仍未改变、属于既有行为或附录 B 的项：一个导演剪辑版样本的年份差异仍判 high、一个低 margin 样本的置信度降为 low、裸数字集号、`S01E01E02`、`Show S01` 目录。前两项已作为 matcher 既有行为写入附录 B；以上不是本轮实现回归。

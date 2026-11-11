@@ -1,5 +1,5 @@
 // Package collect walks a file or directory and returns read-only file facts.
-// It has no knowledge of the mstruct index: callers decide what to persist.
+// It has no knowledge of any index: callers decide what to persist.
 package collect
 
 import (

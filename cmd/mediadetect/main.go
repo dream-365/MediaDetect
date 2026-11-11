@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"syscall"
@@ -17,7 +18,26 @@ import (
 	"github.com/dream-365/MediaDetect/llm"
 )
 
-const version = "0.1.0"
+// defaultVersion is used for local builds where no release version is
+// recorded. version is overridable at build time with
+// -ldflags "-X main.version=x.y.z".
+const defaultVersion = "0.1.1"
+
+var version string
+
+// buildVersion prefers an explicit -ldflags value, then the module version
+// recorded by go install/build, then defaultVersion.
+func buildVersion() string {
+	if version != "" {
+		return version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok {
+		if v := info.Main.Version; v != "" && v != "(devel)" && !strings.HasSuffix(v, "+dirty") {
+			return strings.TrimPrefix(v, "v")
+		}
+	}
+	return defaultVersion
+}
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
@@ -69,7 +89,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) (exit int) {
 		writeJSON(stdout, map[string]string{
 			"name":           "mediadetect",
 			"display_name":   "MediaDetect",
-			"version":        version,
+			"version":        buildVersion(),
 			"schema_version": mediadetect.SchemaVersion,
 		}, cfg.pretty)
 		return 0

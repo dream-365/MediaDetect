@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-// Movie is the subset of a TMDB entry that mstruct uses.
+// Movie is the subset of a TMDB entry that MediaDetect uses.
 type Movie struct {
 	ID            int
 	Title         string

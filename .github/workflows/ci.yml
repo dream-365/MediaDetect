@@ -30,10 +30,12 @@ jobs:
         run: go vet ./...
       - name: go build
         run: go build ./cmd/mediadetect
-      - name: no MStruct dependency
+      - name: no private dependency
         shell: bash
         run: |
-          if go list -deps ./cmd/mediadetect | grep -q '^github.com/dream-365/MStruct'; then
-            echo "MStruct dependency detected"
+          if go list -deps ./cmd/mediadetect \
+            | grep '^github.com/dream-365/' \
+            | grep -v '^github.com/dream-365/MediaDetect'; then
+            echo "private dependency detected"
             exit 1
           fi
