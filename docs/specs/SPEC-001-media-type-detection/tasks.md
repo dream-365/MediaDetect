@@ -4,7 +4,7 @@ status: In Progress
 owner: alang
 depends_on: []
 spec: ./spec.md
-spec_sha256: "5129dbe5f7882074c96bca76332e08586ce4692fed767789b6721ef48c437c15"
+spec_sha256: "eff5b6720eb081efebf22854455745b88b17776929234324d49761af882d6958"
 updated_at: 2026-11-11
 ---
 

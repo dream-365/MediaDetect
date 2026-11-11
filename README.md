@@ -69,9 +69,17 @@ func main() {
 ├── probe/               # 公开：ffprobe/exiftool 封装
 ├── tmdb/                # 公开：TMDB 客户端
 ├── matcher/             # 公开：匹配评分
-├── options.go           # 根包公开配置与契约类型
+├── doc.go               # 根包文档
+├── options.go           # 公开配置与契约类型
 ├── result.go            # JSON 结果类型
 ├── errors.go            # 错误码与错误类型
+├── detect.go            # Detect 入口与输入检查
+├── aggregate.go         # 目录级聚合
+├── mapping.go           # 本地类型映射
+├── match.go             # 匹配编排
+├── policy.go            # 匹配状态决策
+├── warnings.go          # warning 去重与排序
+├── *_test.go            # 根包测试
 └── docs/                # Spec 与质量报告
 ```
 

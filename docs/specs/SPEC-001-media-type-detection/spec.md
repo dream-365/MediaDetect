@@ -661,7 +661,7 @@ func Detect(ctx context.Context, path string, opts Options) (Result, error)
 * `TMDBOptions.BaseURL/Language` 为空时沿用 `MediaDetect/tmdb.New` 的默认值；`HTTPClient=nil` 时使用 10s 超时的默认 client；`CacheLimit` 控制三个进程内 map 的条数上限，超出后停止新增（不淘汰已有条目），避免无界增长。
 * `Resolver` 由 CLI 在 `--llm-fallback` 时注入 `llm.FromEnv()`；`Detect` 不直接读环境变量。`LLMFallback=true` 且 `Resolver=nil` 时不启用 LLM，追加 `match.llm_key_missing` warning 并继续，不返回顶层错误。
 * `Detect` 成功时返回非零 `Result` 和 `nil` error；路径/输入错误时返回零 `Result` 和 `*Error`。匹配失败、无 key、未匹配、剧集不适用都属于成功结果，通过 `match.status` 和 `warnings` 表达；只有存在电影文件且 `MatchOn` 的匹配基础设施失败会同时设置 `match.status=error` 并让 CLI 退出 4；context 取消优先返回 `ERR_CANCELED`。
-* 根包不暴露 `MediaDetect` 模块的内部实现细节；`MediaInfo` 是唯一跨边界的技术元数据结构。根包自行定义 `MediaInfo`，字段与 `probe.Info` 一致，并在根包边界显式转换；不再使用类型别名。该调整由 SPEC-002 §4.4.1 替代。
+* 根包不暴露 `MediaDetect` 模块的内部实现细节；`MediaInfo` 是唯一跨边界的技术元数据结构。根包自行定义 `MediaInfo`，字段与 `probe.Info` 一致，并在根包边界显式转换；不再使用类型别名。该调整由 SPEC-002 §4.2/§4.3 替代。
 * `Options.Resolver` 的类型为根包 `QueryResolver`，方法集与 `matcher.QueryResolver` 一致；外部实现无需导入 `matcher`。
 * `ErrProbeUnavailable` 是根包错误契约，与 `probe.ErrUnavailable` 为同一 sentinel；外部 `Prober` 返回该错误时，根包以 `errors.Join(ErrProbeUnavailable, err)` 保留 `errors.Is` 语义。
 

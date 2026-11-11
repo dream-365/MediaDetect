@@ -8,6 +8,15 @@ updated_at: 2026-11-11
 
 # Changelog: SPEC-001 MediaDetect 媒体检测库与 CLI
 
+## [2026-11-11] - 修正交叉引用
+
+- **修改类型**: Fixed
+- **影响范围**: §4.4.1；`tasks.md` 的 `spec_sha256`
+- **变更原因**: §4.4.1 引用了不存在的 SPEC-002 §4.4.1；按 CLAUDE.md 先将本 Spec 状态回退为 `In Review`，修正后恢复 `Approved`。
+- **具体内容**:
+  - 将“SPEC-002 §4.4.1”改为“SPEC-002 §4.2/§4.3”，与同节开头的替代说明一致
+  - 重算 `tasks.md` 的 `spec_sha256`，使其与修订后的 `spec.md` 一致
+
 ## [2026-11-11] - SPEC-002 包边界替代
 
 - **修改类型**: Changed
