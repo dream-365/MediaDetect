@@ -1,0 +1,39 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: go mod tidy
+        run: go mod tidy -diff
+      - name: go test
+        run: go test ./...
+      - name: go vet
+        run: go vet ./...
+      - name: go build
+        run: go build ./cmd/mediadetect
+      - name: no MStruct dependency
+        shell: bash
+        run: |
+          if go list -deps ./cmd/mediadetect | grep -q '^github.com/dream-365/MStruct'; then
+            echo "MStruct dependency detected"
+            exit 1
+          fi
