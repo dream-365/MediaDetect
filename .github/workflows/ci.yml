@@ -91,7 +91,12 @@ jobs:
       - name: version
         shell: bash
         run: |
-          "$RUNNER_TEMP/mediadetect" --version | grep -q '"version":"0.2.1"'
+          version=$("$RUNNER_TEMP/mediadetect" --version)
+          printf '%s\n' "$version"
+          case "$version" in
+            *'"version":"0.2.1"'*) ;;
+            *) echo "unexpected version output"; exit 1 ;;
+          esac
       - name: py_compile
         run: python3 -m py_compile skills/media-title/scripts/media_title.py
       - name: python tests
