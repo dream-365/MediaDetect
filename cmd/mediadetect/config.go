@@ -12,7 +12,7 @@ import (
 // defaultVersion is used for local builds where no release version is
 // recorded. version is overridable at build time with
 // -ldflags "-X main.version=x.y.z".
-const defaultVersion = "0.2.0"
+const defaultVersion = "0.2.1"
 
 var version string
 

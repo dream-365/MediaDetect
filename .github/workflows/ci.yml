@@ -61,7 +61,7 @@ jobs:
           cd "$tmp"
           go mod init example.com/internal-probe
           go mod edit -replace "github.com/dream-365/MediaDetect=${GITHUB_WORKSPACE}"
-          go mod edit -require github.com/dream-365/MediaDetect@v0.2.0
+          go mod edit -require github.com/dream-365/MediaDetect@v0.2.1
 
           for pkg in collect llm; do
             printf '%s\n' 'package main' '' "import _ \"github.com/dream-365/MediaDetect/internal/${pkg}\"" '' 'func main() {}' > main.go
@@ -71,3 +71,30 @@ jobs:
             fi
             printf '%s\n' "$output" | grep -q 'use of internal package'
           done
+
+  skills:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: build mediadetect
+        run: go build -o "$RUNNER_TEMP/mediadetect" ./cmd/mediadetect
+      - name: version
+        shell: bash
+        run: |
+          "$RUNNER_TEMP/mediadetect" --version | grep -q '"version":"0.2.1"'
+      - name: py_compile
+        run: python3 -m py_compile skills/media-title/scripts/media_title.py
+      - name: python tests
+        env:
+          MD_BIN: ${{ runner.temp }}/mediadetect
+        run: python3 -m unittest discover -s skills/media-title/tests -v

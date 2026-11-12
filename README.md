@@ -4,7 +4,7 @@ MediaDetect 是一个无状态、只读的媒体类型检测库与 CLI。输入�
 
 它不创建索引、不写 SQLite、不写缓存或临时文件，也不会修改输入目录中的任何文件。
 
-- 当前版本：`0.2.0`
+- 当前版本：`0.2.1`
 - JSON Schema 版本：`"1"`
 - 最低 Go 版本：`1.27.1`
 - License：[MIT](LICENSE)
@@ -12,7 +12,7 @@ MediaDetect 是一个无状态、只读的媒体类型检测库与 CLI。输入�
 ## 安装
 
 ```bash
-go install github.com/dream-365/MediaDetect/cmd/mediadetect@v0.2.0
+go install github.com/dream-365/MediaDetect/cmd/mediadetect@v0.2.1
 ```
 
 `go install` 会把二进制装到 `$(go env GOPATH)/bin/mediadetect`，不需要手写模块代理转义。
@@ -80,6 +80,7 @@ func main() {
 ├── policy.go            # 匹配状态决策
 ├── warnings.go          # warning 去重与排序
 ├── *_test.go            # 根包测试
+├── skills/media-title/  # 通用 Agent Skill：scan → plan → apply → rollback
 └── docs/                # Spec 与质量报告
 ```
 
@@ -268,6 +269,21 @@ mediadetect --pretty "/path/to/Movie/Inception.2010.mkv" \
 | jq '{warnings: .detection.warnings, files: [.files[] | {path, probe_status, duration_sec}]}'
 ```
 
+## media-title Agent Skill
+
+`skills/media-title/` 是一个通用 Agent Skill，用 MediaDetect 的只读 JSON 输出生成电影/剧集整理计划。它先扫描、再出计划，用户逐项确认后才执行，并保留可回滚的 intent/done 日志。
+
+```bash
+python3 skills/media-title/scripts/media_title.py scan "/path/to/library" --json
+python3 skills/media-title/scripts/media_title.py plan --scan "<state_dir>/scan.json" --json
+python3 skills/media-title/scripts/media_title.py apply \
+  --plan "<state_dir>/plan.json" --expect-plan-id "<plan_id>" --select all --yes
+python3 skills/media-title/scripts/media_title.py rollback \
+  --plan "<state_dir>/plan.json" --expect-plan-id "<plan_id>" --select all --yes
+```
+
+技能本身只依赖 Python 3.9+ 标准库；MediaDetect 通过 `--md-bin` 或 `MD_BIN` 指定。详细工作流见 `skills/media-title/SKILL.md`，命名规则见 `skills/media-title/references/naming.md`。
+
 ## 无状态与只读
 
 - 不写输入目录，不创建索引、SQLite、缓存或临时文件。
@@ -290,7 +306,7 @@ mediadetect --pretty "/path/to/Movie/Inception.2010.mkv" \
 ## 已知限制
 
 - 裸数字集号（如 `Example.Documentary.01.mkv`）仍可能被判为电影。
-- `S01E01E02` 这种无分隔多集写法暂不支持。
+- `S01E01E02`、`S01E01E02E03` 这类连续多集写法自 v0.2.1 起识别为 `tv_episode` 并输出范围；非连续写法（如 `S01E01E03`）仍不识别。
 - `Show S01`、`Show.Season.1` 这类目录名当前按 `tv_series` 处理；只识别 `S01`、`Season 1`、`第 N 季`。
 - 无季集上下文的 `NxM` 数字 token 仍可能有歧义。
 - 中英文双命名且未匹配成功时，`distinct_movies` 可能多算。

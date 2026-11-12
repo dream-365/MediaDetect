@@ -91,6 +91,45 @@ func TestSeasonDisplay(t *testing.T) {
 	}
 }
 
+func TestDisplayTitlesMultiEpisode(t *testing.T) {
+	cases := []struct {
+		title  string
+		season string
+	}{
+		{"Show S01E01E02", "S01E01-E02"},
+		{"Show S01E01E02E03", "S01E01-E03"},
+		{"Show S01E01-E02", "S01E01-E02"},
+	}
+	for _, tc := range cases {
+		got := displayTitles(parser.Hints{
+			TitleCandidates: []string{tc.title},
+			SeasonEpisode:   tc.season,
+		})
+		if len(got) != 1 || got[0] != "Show" {
+			t.Errorf("%q = %v, want [Show]", tc.title, got)
+		}
+	}
+}
+
+func TestDetectMultiEpisodeTitleClean(t *testing.T) {
+	root := t.TempDir()
+	path := writeFile(t, root, "Show.S01E01E02.mkv")
+	result := detectOK(t, path, offlineOptions())
+	if result.MediaType != "tv_episode" {
+		t.Fatalf("media_type = %q", result.MediaType)
+	}
+	if len(result.Files) != 1 {
+		t.Fatalf("files = %d", len(result.Files))
+	}
+	file := result.Files[0]
+	if file.SeasonEpisode == nil || *file.SeasonEpisode != "S01E01-E02" {
+		t.Fatalf("season_episode = %v", file.SeasonEpisode)
+	}
+	if len(file.TitleCandidates) != 1 || file.TitleCandidates[0] != "Show" {
+		t.Fatalf("title_candidates = %v", file.TitleCandidates)
+	}
+}
+
 func TestDisplayTitlesStripEpisodeForms(t *testing.T) {
 	cases := []struct {
 		title  string

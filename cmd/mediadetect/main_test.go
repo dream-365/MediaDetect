@@ -53,7 +53,7 @@ func TestCLIVersionAndHelp(t *testing.T) {
 		t.Fatalf("exit = %d", exit)
 	}
 	obj := decodeSingle(t, out)
-	if obj["name"] != "mediadetect" || obj["schema_version"] != "1" || obj["version"] != "0.2.0" {
+	if obj["name"] != "mediadetect" || obj["schema_version"] != "1" || obj["version"] != "0.2.1" {
 		t.Fatalf("version = %v", obj)
 	}
 

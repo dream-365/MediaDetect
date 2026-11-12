@@ -3,7 +3,7 @@ type: spec
 status: Approved
 owner: alang
 depends_on: []
-updated_at: 2026-11-11
+updated_at: 2026-11-12
 ---
 
 # MediaDetect 媒体检测库与 CLI 技术方案
@@ -53,7 +53,7 @@ MediaDetect 把这些能力收敛为一个独立 Go module 和一个无状态 CL
 
 * **G1 - 无状态 CLI 契约（架构/接口）**：`mediadetect <path>` 和 `mediadetect -` 每次只输出一个 JSON 对象；不创建索引目录、不写 SQLite、不写缓存或临时文件；成功、降级、未匹配和错误都有稳定字段与退出码。验收方式：CLI golden 测试覆盖文件、目录、stdin、缺少参数、路径不存在、无 TMDB key、`--match=off` 七种场景；运行前后对输入树做内容/mtime/inode 快照，断言零写入。
 * **G2 - 独立 detect 模块（架构/代码）**：公开仓库与 Go module `github.com/dream-365/MediaDetect`（仓库名 `MediaDetect`，MIT License）拥有自己的 `go.mod`，包含 `parser`、`probe`、`tmdb`、`matcher`、`internal/llm`、`internal/collect`、根包 `mediadetect` 和 `cmd/mediadetect`；模块不依赖任何私有项目；module path 大小写必须与仓库路径一致。包位置以 SPEC-002 §4.1 为准；G2 的其他验收不变。验收方式：`go test ./...` 通过；`go list -deps ./cmd/mediadetect` 不包含私有依赖；`go mod tidy -diff` 无差异；干净缓存下 `GOWORK=off go mod download github.com/dream-365/MediaDetect@vX.Y.Z` 成功（代理路径转义为 `github.com/dream-365/!media!detect`）；`go install github.com/dream-365/MediaDetect/cmd/mediadetect@vX.Y.Z` 可用。
-* **G3 - 本地媒体类型识别（质量/指标）**：在运行前冻结的人工标注样本（≥100 个真实文件/目录）上，`movie`、`tv_episode`、`tv_season`、`tv_series`、`non_feature`、`auxiliary`、`other` 的总体准确率 ≥95%（不含附录 B 的已知限制桶），并分别报告每类 precision/recall；含已知限制桶的准确率也必须写入报告，但不作为门槛。映射契约测试：4.5.1 每条映射规则有单元测试；parser 已识别的显式剧集标记（`SxxExx`、中文“第 N 集”）在 type 映射上召回率 100%——这是契约测试，不作为真实世界准确率指标。4.5.1.1 的 parser 修正必须覆盖辅助类型优先、`sample`/`oad` 词边界、`ova` 误报、`1x01`/`S01.E01` 和全角斜杠/分数标题；未修正的裸数字集号、`S01E01E02` 等列入附录 B。验收方式：`docs/quality/SPEC-001/calibration-report.md` 给出冻结样本清单、混淆矩阵、逐类样本数、已知限制清单和错误清单；同时用 ≥60 条基于 parser 测试语料和目录 fixture 的回归测试。
+* **G3 - 本地媒体类型识别（质量/指标）**：在运行前冻结的人工标注样本（≥100 个真实文件/目录）上，`movie`、`tv_episode`、`tv_season`、`tv_series`、`non_feature`、`auxiliary`、`other` 的总体准确率 ≥95%（不含附录 B 的已知限制桶），并分别报告每类 precision/recall；含已知限制桶的准确率也必须写入报告，但不作为门槛。映射契约测试：4.5.1 每条映射规则有单元测试；parser 已识别的显式剧集标记（`SxxExx`、中文“第 N 集”）在 type 映射上召回率 100%——这是契约测试，不作为真实世界准确率指标。4.5.1.1 的 parser 修正必须覆盖辅助类型优先、`sample`/`oad` 词边界、`ova` 误报、`1x01`/`S01.E01` 和全角斜杠/分数标题；连续多集 `S01E01E02`/`S01E01E02E03` 按 SPEC-003 G6 修复；未修正的裸数字集号、非连续 `S01E01E03` 等列入附录 B。验收方式：`docs/quality/SPEC-001/calibration-report.md` 给出冻结样本清单、混淆矩阵、逐类样本数、已知限制清单和错误清单；同时用 ≥60 条基于 parser 测试语料和目录 fixture 的回归测试。
 * **G4 - 匹配与 IMDb ID（质量/指标）**：在冻结的 225 个 feature 文件基线上（文件级分母），high 置信匹配率 ≥86.2%（基线 194/225），high+medium 合计 ≥90%（基线 207/225 = 92.0%）；组级口径（221 部）单独报告 high ≥86.9%、high+medium ≥94.6%，不得与文件级数字混用。对 high 置信匹配，`imdb_id` 非空率 ≥95%；剧集文件不得被发送到 TMDB 电影搜索。验收方式：固定样本 + mock TMDB 服务（`--tmdb-base-url` 或库级 `TMDBOptions.BaseURL`）；统计 high/medium 占比、`imdb_id` 缺失清单和搜索请求的媒体类型断言；与历史基线结果做对照并给出允许差异；真实样本报告归档。不得通过人工映射或新增匹配规则达到阈值；95% 及以上属于后续匹配校准 spec 的目标。
 * **G5 - 降级与隐私（可靠性/安全）**：对电影文件，`--match=auto` 且无 `TMDB_API_KEY` 时，本地检测仍返回 `ok=true`、`match.status=disabled`，退出 0；`--match=off` 时零 HTTP 请求（库级测试注入计数 `http.RoundTripper`，CLI 测试用 `--tmdb-base-url` 指向 mock 服务器）；`--match=on` 且缺少 key 或 TMDB 不可达时，本地结果仍输出，电影文件的 `match.status=error`，退出 4；纯剧集/附属输入不因缺少 TMDB key 失败，类型为 `not_applicable`。JSON、stderr 和错误信息中不出现 API key、Authorization、原始 URL query 或响应 body。验收方式：无 key 测试、mock 网络失败测试、key/query 脱敏测试、零请求 transport 计数测试。
 
@@ -819,18 +819,18 @@ mediadetect 不新增分类规则，只把 parser 的已有输出映射为对外
 
 1. **辅助类型优先**：`RoleSubtitle`/`RoleArtwork`/`RoleNFO` 不因 `SeasonEpisode` 非空被覆盖为 `RoleNonFeature`。例：`Show.S01E01.srt` 保持 `subtitle`，`Show.S01E01.jpg` 保持 `artwork`。实现上把 `if h.SeasonEpisode != ""` 改成只对 `RoleFeature` 生效。
 2. **Latin token 按边界匹配**：`sample`、`oad`、`ova` 用分隔符边界匹配，不用裸 `strings.Contains`；否则 `oad` 会误伤 `Road`，`sample` 会误伤 `Sampler`。命中时在 `Hints` 增加 `NonFeatureReason`（token 原文或类别），供 mediadetect 区分 sample/OAD/trailer 与普通剧集；CJK token 保持包含匹配并同样记录原因。
-3. **剧集命名扩展**：支持 `1x01` 和 `S01.E01`，统一规范化为 `S01E01`；`S01E01-E03` 至少把完整 range 从标题剥离，`season_episode` 输出完整 range（如 `S01E01-E03`），`season`/`episode` 取第一段。`S01E01E02` 暂不支持，列入附录 B。
+3. **剧集命名扩展**：支持 `1x01` 和 `S01.E01`，统一规范化为 `S01E01`；`S01E01-E03` 至少把完整 range 从标题剥离，`season_episode` 输出完整 range（如 `S01E01-E03`），`season`/`episode` 取第一段。连续多集 `S01E01E02`/`S01E01E02E03` 按 SPEC-003 G6 识别为范围，要求集号数值连续；非连续 `S01E01E03`/`S01E01E02E04` 不匹配，列入附录 B。
 4. **全角斜杠/分数标题**：`width.Fold` 后的全角 `／` 与半角 `/` 保留为 `/`，不再在 `clean` 中替换为空格；`示例片1／2` 的标题候选保持 `示例片1/2`，避免搜索词被压成 `示例片1 2`。同时 matcher 的 `normalizeTitle` 先做 NFKC，把 TMDB 的 `½` 展开为 `1/2` 后再比较，避免搜索已命中但评分仍判 `unmatched`。只影响标题归一化与比较，不改变角色、季集判断或评分权重。
 5. **测试**：每个反例一条 parser 单测，并在 `mediadetect` 的 type 映射测试中断言；行为变化用 before/after fixture 记录。
 
-这些是行为变更：`Nova` 从 `non_feature` 变 `movie`，`sample`/`OAD` 从 `movie` 变 `non_feature`，带 `SxxExx` 的 sample 从 `tv_episode` 变 `non_feature`，带 `SxxExx` 的字幕/图片从 `non_feature` 变 `auxiliary`，`示例片1／2` 的标题候选从 `示例片1 2` 变为 `示例片1/2`。本版本承诺“行为不变”的路径只覆盖这五项之外的路径。
+这些是行为变更：`Nova` 从 `non_feature` 变 `movie`，`sample`/`OAD` 从 `movie` 变 `non_feature`，带 `SxxExx` 的 sample 从 `tv_episode` 变 `non_feature`，带 `SxxExx` 的字幕/图片从 `non_feature` 变 `auxiliary`，`示例片1／2` 的标题候选从 `示例片1 2` 变为 `示例片1/2`，连续多集 `S01E01E02`/`S01E01E02E03` 从 `movie` 变为 `tv_episode`。本版本承诺“行为不变”的路径只覆盖这些变更之外的路径。
 
 季集展示层解析：
 
 * `SxxExx` 或 `S01E01-E03` 的第一段：`season` = `xx`，`episode` = `yy`；`episode_end` 不在本版输出。
 * 中文“第 N 集/话/話”：`episode` = `N`，`season` = `null`。
 * 其他形式：`season`/`episode` 为 `null`，保留 `season_episode` 原文。
-* 剧集标题候选：从 `Hints.TitleCandidates` 中剥离 `season_episode` 原文（大小写不敏感）以及紧随其后的 `-E\d+` range，trim 后去重；这是展示层剥离，不修改 parser 的 `TitleCandidates`。
+* 剧集标题候选：从 `Hints.TitleCandidates` 中剥离 `season_episode` 原文（大小写不敏感）、连续 `E\d+` 段以及 `-E\d+` range，trim 后去重；这是展示层剥离，不修改 parser 的 `TitleCandidates`。
 
 #### 4.5.2 目录级聚合
 
@@ -1118,7 +1118,7 @@ MediaDetect 是无状态库与 CLI，没有服务流量；按以下阶梯发布�
 
 * **必须修**：辅助类型被季集覆盖会把字幕/海报报成剧集；`sample`/`OAD` 缺失会把花絮报成电影并发送到 TMDB；`ova` 子串会把 `Nova` 报成非正片；`1x01`/`S01.E01` 未识别会把常见剧集报成电影；全角斜杠被压成空格会让 `示例片1/2` 这类标题在 TMDB 搜不到，而即使搜索命中，TMDB 的 `½` 与文件名的 `1/2` 在评分比较中仍可能被判 `unmatched`。这些直接破坏 `media_type`、匹配率和“剧集不搜电影”的核心承诺。
 * **修法**：每项都是现有 token 表、角色 guard、episode 正则、`clean` 分隔符表或 `normalizeTitle` 的局部修正，不引入新的分类器、评分权重或数据源；修复后库和 CLI 共用同一份修正。
-* **不并入**：`S01E01E02`、裸数字集号、`Show S01` 目录、更多语言命名变体列入附录 B，避免把“抽取”变成 parser 重写。
+* **不并入**：非连续 `S01E01E03`、裸数字集号、`Show S01` 目录、更多语言命名变体列入附录 B，避免把“抽取”变成 parser 重写。
 * **替代路线**：如果要求严格零行为变化，就只做纯抽取 + 已知限制 + 后续 parser spec。本 spec 选择“抽取 + 五个局部修正”，因为不修这些项时交付的 `media_type` 和匹配结果不可信；parser 修正必须单独 commit，并带 before/after fixture。
 
 ## 附录 A：延后项与触发条件
@@ -1136,7 +1136,7 @@ MediaDetect 是无状态库与 CLI，没有服务流量；按以下阶梯发布�
 | 限制 | 当前行为 | 影响字段/Goal | 处理 |
 | --- | --- | --- | --- |
 | 裸数字集号（`Example.Documentary.01.mkv`） | `movie` | G3 总体准确率、剧集召回 | 单列已知限制桶；不计入剧集召回分母，但总体准确率同时报告含/不含 |
-| `S01E01E02` 无分隔多集 | `movie`，可能发送到 TMDB | G3/G4 | 列入已知限制；后续 parser spec 支持 |
+| 非连续 `S01E01E03`/`S01E01E02E04` | `movie`，可能发送到 TMDB | G3/G4 | 列入已知限制；连续 `S01E01E02` 已由 SPEC-003 G6 修复 |
 | `Show S01` / `Show.Season.1` 目录 | `tv_series` 而非 `tv_season` | G3 目录类型 | 列入已知限制；当前只识别 `Season 1` / `S01` / `第 N 季` |
 | 同名同年翻拍 / 同名不同片 | pre-match `GroupKey` 相同，可能合并为一组 | `movie_collection`、`distinct_movies`、match | 匹配后按 `best.Movie.ID` union；未匹配的同名组仍可能碰撞，列入已知限制 |
 | 中英文双命名同一部电影 | pre-match `GroupKey` 不同，可能先算成两个组 | `movie_collection`、`distinct_movies` | 匹配后按 `movie_id` union 修正；未匹配时仍可能多算 |
