@@ -1,0 +1,118 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "media-title plan",
+  "type": "object",
+  "required": [
+    "schema_version", "session_id", "session_token", "state_dir",
+    "plan_id", "generated_at", "root", "mode", "options",
+    "units", "unplanned", "skipped", "errors", "summary"
+  ],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "session_id": {"type": "string", "minLength": 1, "maxLength": 64},
+    "session_token": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "state_dir": {"type": "string"},
+    "plan_id": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "generated_at": {"type": "string"},
+    "tool_version": {"type": "string"},
+    "root": {"type": "string"},
+    "mode": {"type": "string"},
+    "options": {"type": "object"},
+    "units": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "status", "sources", "target", "operations"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^u[0-9]+$"},
+          "kind": {"enum": ["movie", "tv"]},
+          "status": {"const": "planned"},
+          "confidence": {},
+          "match_status": {"type": "string"},
+          "sources": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["path", "kind", "state"],
+              "properties": {
+                "path": {"type": "string"},
+                "kind": {"enum": ["file", "directory"]},
+                "state": {"type": "object"}
+              }
+            }
+          },
+          "source_hash": {"type": "string"},
+          "sibling_snapshot": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {"type": "string"}
+            }
+          },
+          "target": {
+            "type": "object",
+            "required": ["path", "kind"],
+            "properties": {
+              "path": {"type": "string"},
+              "kind": {"enum": ["file", "directory"]}
+            }
+          },
+          "operations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["op"],
+              "properties": {
+                "op": {"enum": ["mkdir", "move", "remove_empty_dir"]},
+                "path": {"type": "string"},
+                "from": {"type": "string"},
+                "to": {"type": "string"},
+                "from_state": {"type": "object"},
+                "pre_exists": {"type": "boolean"},
+                "pre_state": {"type": ["object", "null"]},
+                "pre_empty": {"type": "boolean"},
+                "removed_state": {"type": "object"}
+              }
+            }
+          },
+          "warnings": {"type": "array"},
+          "evidence": {"type": "object"}
+        }
+      }
+    },
+    "unplanned": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "kind", "reason_code", "reason"],
+        "properties": {
+          "path": {"type": "string"},
+          "kind": {"type": "string"},
+          "reason_code": {"type": "string"},
+          "reason": {"type": "string"}
+        }
+      }
+    },
+    "skipped": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "reason_code", "reason"]
+      }
+    },
+    "errors": {"type": "array"},
+    "warnings": {"type": "array"},
+    "summary": {
+      "type": "object",
+      "required": ["units", "planned", "skipped", "unplanned", "operations"],
+      "properties": {
+        "units": {"type": "integer"},
+        "planned": {"type": "integer"},
+        "skipped": {"type": "integer"},
+        "unplanned": {"type": "integer"},
+        "operations": {"type": "integer"}
+      }
+    }
+  }
+}

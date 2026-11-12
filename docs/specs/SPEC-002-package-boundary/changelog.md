@@ -3,10 +3,20 @@ type: changelog
 status: Published
 owner: alang
 depends_on: []
-updated_at: 2026-11-11
+updated_at: 2026-11-12
 ---
 
 # Changelog: SPEC-002 MediaDetect Go 包边界与工程结构
+
+## [2026-11-12] - SPEC-003 G6 版本口径 0.2.1
+
+- **修改类型**: Changed
+- **影响范围**: §2.1 G4/G5；§4.9；§6.3；`tasks.md` 的 `spec_sha256`
+- **变更原因**: SPEC-003 G6 将 MediaDetect 发布版本从 `0.2.0` 提升到 `0.2.1`；本 Spec 的 G4/G5 要求 README、安装 tag、`defaultVersion` 与目标 tag 四者一致。按 CLAUDE.md，先把本 Spec 状态回退为 `In Review`、更新 `updated_at`、记录变更；回退期间不修改生产代码。
+- **具体内容**:
+  - G4/G5 与 §4.9/§6.3 的版本口径由 `0.2.0` 更新为 `0.2.1`
+  - 明确 `cmd/mediadetect/main_test.go` 的 `--version` 断言同步为 `0.2.1`
+  - 完成实现与验证后恢复 `Approved`
 
 ## [2026-11-11] - 初始草案
 

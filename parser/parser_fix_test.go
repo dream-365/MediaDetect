@@ -49,6 +49,33 @@ func TestEpisodeXFalsePositives(t *testing.T) {
 	}
 }
 
+func TestMultiEpisodeRanges(t *testing.T) {
+	cases := []struct {
+		file   string
+		role   string
+		season string
+	}{
+		{"Show.S01E01E02.mkv", RoleNonFeature, "S01E01-E02"},
+		{"Show.S01E01E02E03.mkv", RoleNonFeature, "S01E01-E03"},
+		{"Show.S01E01-E02.mkv", RoleNonFeature, "S01E01-E02"},
+		{"Show.S01E01-E03.mkv", RoleNonFeature, "S01E01-E03"},
+		{"Show.S01E01E03.mkv", RoleFeature, ""},
+		{"Show.S01E01E02E04.mkv", RoleFeature, ""},
+		{"Show.S01E01E02-E04.mkv", RoleFeature, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.file, func(t *testing.T) {
+			h := Parse(tc.file)
+			if h.RoleHint != tc.role {
+				t.Fatalf("role = %q, want %q", h.RoleHint, tc.role)
+			}
+			if h.SeasonEpisode != tc.season {
+				t.Fatalf("season_episode = %q, want %q", h.SeasonEpisode, tc.season)
+			}
+		})
+	}
+}
+
 func TestParserFixes(t *testing.T) {
 	cases := []struct {
 		name   string

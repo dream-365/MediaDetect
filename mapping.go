@@ -61,7 +61,7 @@ func displayTitles(h parser.Hints) []string {
 
 var (
 	rangeSuffixRE     = regexp.MustCompile(`(?i)[-~]e?\d{1,3}$`)
-	displayEpisodeRE  = regexp.MustCompile(`(?i)(?:^|[\s._-])s\d{1,2}\s*[._-]?\s*e\d{1,3}(?:\s*[-~]\s*e?\d{1,3})?`)
+	displayEpisodeRE  = regexp.MustCompile(`(?i)(?:^|[\s._-])s\d{1,2}\s*[._-]?\s*e\d{1,3}(?:\s*[._-]?\s*e\d{1,3})*`)
 	displayXEpisodeRE = regexp.MustCompile(`(?i)\b\d{1,2}x\d{1,3}\b`)
 	displayCJKEpRE    = regexp.MustCompile(`第\s*\d+\s*[集话話]`)
 )
@@ -70,13 +70,13 @@ func stripEpisode(title, seasonEpisode string) string {
 	stripped := title
 	if seasonEpisode != "" {
 		quoted := regexp.QuoteMeta(seasonEpisode)
-		re := regexp.MustCompile(`(?i)` + quoted + `(?:[-~]e\d{1,3})?`)
+		re := regexp.MustCompile(`(?i)` + quoted + `(?:\s*[._~-]?\s*e\d{1,3})*`)
 		stripped = re.ReplaceAllString(stripped, " ")
 		if stripped == title {
 			// The title may contain only the first segment of a range.
 			base := rangeSuffixRE.ReplaceAllString(seasonEpisode, "")
 			if base != "" {
-				re = regexp.MustCompile(`(?i)` + regexp.QuoteMeta(base) + `(?:[-~]e?\d{1,3})?`)
+				re = regexp.MustCompile(`(?i)` + regexp.QuoteMeta(base) + `(?:\s*[._~-]?\s*e\d{1,3})*`)
 				stripped = re.ReplaceAllString(stripped, " ")
 			}
 		}

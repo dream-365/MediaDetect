@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"regexp"
 	"runtime/debug"
 	"strings"
 
@@ -12,20 +13,31 @@ import (
 // defaultVersion is used for local builds where no release version is
 // recorded. version is overridable at build time with
 // -ldflags "-X main.version=x.y.z".
-const defaultVersion = "0.2.0"
+const defaultVersion = "0.2.1"
 
 var version string
 
-// buildVersion prefers an explicit -ldflags value, then the module version
-// recorded by go install/build, then defaultVersion.
+var releaseVersionRE = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
+
+// normalizeBuildVersion accepts only a released semver. Local `go build`
+// inside a git checkout reports a VCS pseudo-version such as
+// "0.0.0-20261112063404-8f87066b4abc"; that must not override the default.
+func normalizeBuildVersion(value string) string {
+	value = strings.TrimPrefix(value, "v")
+	if releaseVersionRE.MatchString(value) {
+		return value
+	}
+	return defaultVersion
+}
+
+// buildVersion prefers an explicit -ldflags value, then the released module
+// version recorded by go install, then defaultVersion.
 func buildVersion() string {
 	if version != "" {
 		return version
 	}
 	if info, ok := debug.ReadBuildInfo(); ok {
-		if v := info.Main.Version; v != "" && v != "(devel)" && !strings.HasSuffix(v, "+dirty") {
-			return strings.TrimPrefix(v, "v")
-		}
+		return normalizeBuildVersion(info.Main.Version)
 	}
 	return defaultVersion
 }

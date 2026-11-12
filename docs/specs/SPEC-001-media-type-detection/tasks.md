@@ -4,8 +4,8 @@ status: In Progress
 owner: alang
 depends_on: []
 spec: ./spec.md
-spec_sha256: "eff5b6720eb081efebf22854455745b88b17776929234324d49761af882d6958"
-updated_at: 2026-11-11
+spec_sha256: "572b24e9d1ae4500437f499be177587cdf6658dbbb7fd6d3d9327d7318692ff9"
+updated_at: 2026-11-12
 ---
 
 # MediaDetect v0.1.0 执行拆解

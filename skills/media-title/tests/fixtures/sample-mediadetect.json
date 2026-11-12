@@ -1,0 +1,43 @@
+{
+  "schema_version": "1",
+  "ok": true,
+  "input": {"path": "Show.S01E01E02.mkv", "kind": "file"},
+  "media_type": "tv_episode",
+  "confidence": "high",
+  "title": "Show",
+  "year": null,
+  "summary": {
+    "total_files": 1,
+    "movie_files": 0,
+    "episode_files": 1,
+    "non_feature_files": 0,
+    "auxiliary_files": 0,
+    "other_files": 0,
+    "distinct_movies": 0,
+    "seasons": [1],
+    "skipped_hidden": 0,
+    "skipped_symlinks": 0,
+    "unreadable": 0,
+    "unmatched_movie_groups": 0
+  },
+  "files": [
+    {
+      "path": "Show.S01E01E02.mkv",
+      "name": "Show.S01E01E02.mkv",
+      "ext": ".mkv",
+      "role": "episode",
+      "media_type": "tv_episode",
+      "confidence": "high",
+      "title_candidates": ["Show"],
+      "year_candidates": [],
+      "season_episode": "S01E01-E02",
+      "season": 1,
+      "episode": 1,
+      "group_key": null,
+      "match": {"status": "not_applicable", "best": null, "candidates": [], "reason": null, "file": null, "margin": null, "error": null}
+    }
+  ],
+  "match": {"status": "not_applicable", "best": null, "candidates": [], "reason": null, "file": null, "margin": null, "error": null},
+  "detection": {"probe_mode": "off", "match_mode": "off", "warnings": [], "truncated": false},
+  "attribution": null
+}

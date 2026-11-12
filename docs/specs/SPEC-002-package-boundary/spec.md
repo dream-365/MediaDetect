@@ -4,7 +4,7 @@ status: Approved
 owner: alang
 depends_on:
   - docs/specs/SPEC-001-media-type-detection/spec.md
-updated_at: 2026-11-11
+updated_at: 2026-11-12
 ---
 
 # MediaDetect Go 包边界与工程结构 技术方案
@@ -15,7 +15,7 @@ updated_at: 2026-11-11
 | 主笔 | alang |
 | 评审人 | alang（维护者兼下游调用方代表） |
 | 创建日期 | 2026-11-11 |
-| 目标版本 | v0.2.0 |
+| 目标版本 | v0.2.1 |
 | 关联资源 | SPEC-001；`README.md`；`docs/specs/README.md`；Go module `github.com/dream-365/MediaDetect` |
 
 ## 1. 背景与上下文
@@ -78,8 +78,8 @@ MediaDetect 是一个无状态、只读的媒体类型检测库与 CLI，当前 
 * **G1 - 架构/代码：收敛公开边界**：公开包只保留根包 `mediadetect`、`parser`、`probe`、`tmdb`、`matcher`；`collect`、`llm` 移入 `internal/`，下游不可导入。验收：排除 `/internal/` 后 `go list ./...` 恰好给出根包、`cmd/mediadetect` 和四个领域包；`parser`、`probe`、`tmdb`、`matcher` 的依赖列表中不出现 `/internal/`；外部临时模块导入 `.../internal/collect` 或 `.../internal/llm` 编译失败，临时模块必须先 `require` 本模块并用 `replace` 指向本地仓库，断言错误信息包含 `internal` 拒绝文本，避免因模块缺失而假阳性；该断言进入 CI。
 * **G2 - 架构/代码：公共契约与实现解耦**：根包不再别名 `probe` 或 `matcher` 的类型；`MediaInfo`、`QueryResolver` 在根包内定义，并导出与 `probe.ErrUnavailable` 同值的 `ErrProbeUnavailable`；`result.go` 不再导入这两个子包。验收：`go doc github.com/dream-365/MediaDetect` 中两个类型显示为本地定义；`result.go` 的 import 不含 `probe`、`matcher`；`detect_test.go` 的 `proberFunc` 返回类型改为 `MediaInfo` 后，现有检测与匹配测试全部通过；新增字段转换测试断言 `MediaInfo` 与 `probe.Info` 无损互转；新增 `errors.Is` 测试断言 `ErrProbeUnavailable` 与 `probe.ErrUnavailable` 等价。
 * **G3 - 可维护性：CLI 按职责拆分**：`cmd/mediadetect/main.go` 只保留 `main` 与 `run`，参数、输入、输出、help、版本与配置分别落到独立文件。验收：`main.go` ≤120 行；新增 CLI 文件各自 ≤200 行；`go test ./cmd/mediadetect` 的现有用例全部通过；CLI stdout/stderr/退出码不变。
-* **G4 - 工程效率：文档与版本口径一致**：README 的项目结构、公开包列表、安装版本和目标版本一致；`docs/specs/README.md` 收录 SPEC-002；SPEC-001 的受影响条款按约定处理。验收：README 中公开包列表与 G1 的 `go list` 结果一致；README 当前版本、README 安装 tag、`defaultVersion`、目标 tag 四者一致指向 `0.2.0`，并以 git tag 作为发布 SSOT；SPEC-001 的 §2.1 G2、§3.2、§4.4.1、§4.4.1.1 带指向 SPEC-002 的替代说明；SPEC-001 中 `v0.1.0` 的目标版本、`--version` 示例和 `tasks.md` 标题作为历史基线保留，不作为当前版本验收项。
-* **G5 - 可靠性：构建与行为基线不变**：不新增第三方依赖，不改变 JSON schema，不改变检测结果。验收：`gofmt -l .` 为空；`go mod tidy -diff` 无差异；`go vet ./...`、`go test ./...`、`go build ./cmd/mediadetect` 全部通过；同一输入在整理前后的 JSON 输出逐字节一致，唯一允许的差异是 `--version` 从 `0.1.1` 变为 `0.2.0`。
+* **G4 - 工程效率：文档与版本口径一致**：README 的项目结构、公开包列表、安装版本和目标版本一致；`docs/specs/README.md` 收录 SPEC-002；SPEC-001 的受影响条款按约定处理。验收：README 中公开包列表与 G1 的 `go list` 结果一致；README 当前版本、README 安装 tag、`defaultVersion`、目标 tag 四者一致指向 `0.2.1`，并以 git tag 作为发布 SSOT；SPEC-001 的 §2.1 G2、§3.2、§4.4.1、§4.4.1.1 带指向 SPEC-002 的替代说明；SPEC-001 中 `v0.1.0` 的目标版本、`--version` 示例和 `tasks.md` 标题作为历史基线保留，不作为当前版本验收项。
+* **G5 - 可靠性：构建与行为基线不变**：不新增第三方依赖，不改变 JSON schema，不改变检测结果。验收：`gofmt -l .` 为空；`go mod tidy -diff` 无差异；`go vet ./...`、`go test ./...`、`go build ./cmd/mediadetect` 全部通过；同一输入在整理前后的 JSON 输出逐字节一致，唯一允许的差异是 `--version` 从 `0.1.1` 变为 `0.2.1`。
 
 ### 2.2 非目标
 
@@ -312,8 +312,8 @@ Goal 与章节的对应关系：G1 由 4.1 和 4.6 的导入边界覆盖；G2 �
 
 ### 4.9 文档与版本同步
 
-* **README**：更新“当前版本”为 `0.2.0`，安装示例 tag 同步为 `v0.2.0`；把“下游集成”中的公开包列表收敛为 `parser`、`probe`、`tmdb`、`matcher`，并说明 `collect`、`llm` 已移入 `internal/`；新增“项目结构”小节，展示 4.1 的目录树和公开/内部边界。
-* **版本注入**：`defaultVersion` 更新为 `0.2.0`；`--version` 的构建注入机制不变。
+* **README**：更新“当前版本”为 `0.2.1`，安装示例 tag 同步为 `v0.2.1`；把“下游集成”中的公开包列表收敛为 `parser`、`probe`、`tmdb`、`matcher`，并说明 `collect`、`llm` 已移入 `internal/`；新增“项目结构”小节，展示 4.1 的目录树和公开/内部边界。
+* **版本注入**：`defaultVersion` 更新为 `0.2.1`；`--version` 的构建注入机制不变。
 * **Spec 索引**：`docs/specs/README.md` 增加 SPEC-002 行，状态与链接同步。
 * **SPEC-001 替代范围**：以下条款写入指向 SPEC-002 的替代说明，其余行为契约继续有效。
   * §2.1 G2：包清单中的 `llm`、`collect` 改为 `internal/llm`、`internal/collect`；G2 的其他验收不变。
@@ -330,7 +330,7 @@ Goal 与章节的对应关系：G1 由 4.1 和 4.6 的导入边界覆盖；G2 �
 ### 5.1 行为与确定性
 
 * **检测结果不变**：同一输入在整理前后，`Result` 的字段值和 JSON 序列化逐字节一致；`schema_version` 保持 `"1"`。
-* **唯一允许的输出版本差异**：`--version` 的 `version` 从 `0.1.1` 变为 `0.2.0`，其余字段不变。
+* **唯一允许的输出版本差异**：`--version` 的 `version` 从 `0.1.1` 变为 `0.2.1`，其余字段不变。
 * **零写入与只读语义不变**：现有 `TestDetectZeroWrite`、`TestCLIZeroWrite`、零 HTTP 请求和凭据脱敏测试全部通过。
 
 ### 5.2 构建与测试
@@ -363,11 +363,11 @@ Goal 与章节的对应关系：G1 由 4.1 和 4.6 的导入边界覆盖；G2 �
 
 ### 6.1 发布与灰度
 
-本次没有运行时服务，因此不使用流量灰度；用“分阶段提交 + 每阶段 CI 观察期”代替。每个阶段必须 CI 全绿后才能进入下一阶段，观察指标为 `go test ./...`、`go vet ./...`、`go build ./cmd/mediadetect` 和公开包清单。按 v0.x 语义发布 `v0.2.0` minor 版本，步骤分三段：
+本次没有运行时服务，因此不使用流量灰度；用“分阶段提交 + 每阶段 CI 观察期”代替。每个阶段必须 CI 全绿后才能进入下一阶段，观察指标为 `go test ./...`、`go vet ./...`、`go build ./cmd/mediadetect` 和公开包清单。按 v0.x 语义发布 `v0.2.1` patch 版本，步骤分三段：
 
 1. **文档段**：提交 SPEC-002、更新 Spec 索引；用户明确批准 SPEC-002 后，由维护者按 CLAUDE.md 回退 SPEC-001 的受影响条款（§2.1 G2、§3.2、§4.4.1、§4.4.1.1），更新 `updated_at`、追加 changelog、写入替代说明并重算 `tasks.md` 的 `spec_sha256`，然后恢复为 `Approved`/`Implemented`。此段不修改生产代码。
 2. **实现段**：移动 `collect`、`llm`；拆分 CLI；解耦根包公共类型；更新 README、版本号和导入路径。实现段在用户明确批准 SPEC-002 且 SPEC-001 重新回到 `Approved`/`Implemented` 后开始。
-3. **发布段**：CI 全绿后打 `v0.2.0` tag；tag 推送后按 SPEC-001 6.5 不移动、不删除。
+3. **发布段**：CI 全绿后打 `v0.2.1` tag；tag 推送后按 SPEC-001 6.5 不移动、不删除。
 
 不设灰度：这是源码级结构变更，没有运行时服务；下游通过版本号选择升级。
 
@@ -375,7 +375,7 @@ Goal 与章节的对应关系：G1 由 4.1 和 4.6 的导入边界覆盖；G2 �
 
 * 无数据库、无索引、无持久化数据，不需要数据迁移。
 * Go API 迁移按 4.7 执行；`Options`、`Result`、JSON 契约保持兼容。
-* 旧版本下游可继续使用 `v0.1.1`；升级到 `v0.2.0` 时需要处理 `collect` / `llm` 导入，以及 `MediaInfo` / `QueryResolver` / `Prober` 的类型身份变化。
+* 旧版本下游可继续使用 `v0.1.1`；升级到 `v0.2.1` 时需要处理 `collect` / `llm` 导入，以及 `MediaInfo` / `QueryResolver` / `Prober` 的类型身份变化。
 
 ### 6.3 上线验证与冒烟
 
@@ -396,7 +396,7 @@ go list ./... | grep -v '/internal/'
 * `go list -f '{{.ImportPath}}: {{join .Imports " "}}' ./parser ./probe ./tmdb ./matcher | grep '/internal/'` 无输出。
 * `result.go` 的 import 不含 `probe`、`matcher`：用 `if grep -Eq '"github.com/dream-365/MediaDetect/(probe|matcher)"' result.go; then echo "result.go imports probe/matcher"; exit 1; fi` 断言无匹配；grep 退出码 1 表示无匹配，不能直接当成失败。也可用等价的 Go AST 检查。
 * 用同一组文件/目录 fixture 在整理前后运行 CLI，stdout 用 `cmp` 比较；除 `--version` 外必须一致。
-* 在仓库外的临时 module 中验证 `internal` 不可导入：`go mod init example.com/internal-probe`；创建 `main.go`，写入 `import _ "github.com/dream-365/MediaDetect/internal/collect"` 和空的 `main`；执行 `go mod edit -replace github.com/dream-365/MediaDetect=<本地仓库绝对路径>`、`go mod edit -require github.com/dream-365/MediaDetect@v0.2.0`，再执行 `GOFLAGS=-mod=mod go build ./...`；命令必须失败，且 stderr 包含 `use of internal package ... not allowed`；对 `internal/llm` 重复一次。不要用 `go list .../internal/collect` 作为断言：直接列出内部包不会触发导入者可见性检查。
+* 在仓库外的临时 module 中验证 `internal` 不可导入：`go mod init example.com/internal-probe`；创建 `main.go`，写入 `import _ "github.com/dream-365/MediaDetect/internal/collect"` 和空的 `main`；执行 `go mod edit -replace github.com/dream-365/MediaDetect=<本地仓库绝对路径>`、`go mod edit -require github.com/dream-365/MediaDetect@v0.2.1`，再执行 `GOFLAGS=-mod=mod go build ./...`；命令必须失败，且 stderr 包含 `use of internal package ... not allowed`；对 `internal/llm` 重复一次。不要用 `go list .../internal/collect` 作为断言：直接列出内部包不会触发导入者可见性检查。
 * 发布段执行 `git describe --tags --exact-match`，断言 `--version` 输出的 `version` 等于去掉前缀 `v` 的 tag；开发分支不执行此断言。
 
 ### 6.4 回滚与熔断
@@ -408,7 +408,7 @@ go list ./... | grep -v '/internal/'
   * `parser`、`probe`、`tmdb`、`matcher` 的 import 列表中出现 `/internal/` 的次数 > 0；
   * `cmd/mediadetect/main.go` 行数 > 120；
   * 下游迁移矩阵之外出现额外破坏。
-* **回滚步骤**：在 tag 推送前，直接回退实现段提交并恢复文档状态；不涉及数据或运行时。若 `v0.2.0` 已推送且发现阻断问题，按 SPEC-001 6.5 发布 `v0.2.1` 修复，必要时 `retract` `v0.2.0`，不移动既有 tag。
+* **回滚步骤**：在 tag 推送前，直接回退实现段提交并恢复文档状态；不涉及数据或运行时。若 `v0.2.1` 已推送且发现阻断问题，按 SPEC-001 6.5 发布 `v0.2.2` 修复，必要时 `retract` `v0.2.1`，不移动既有 tag。
 * **熔断**：实现段若在 1 个工作日内无法让 `go test ./...` 全绿，停止继续搬运，保留已通过的独立提交，回到 SPEC-002 重新拆分任务。
 
 ## 7. 替代方案与权衡

@@ -52,15 +52,17 @@ var (
 	artworkExts  = map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".webp": true}
 	nfoExts      = map[string]bool{".nfo": true}
 
-	yearRE       = regexp.MustCompile(`(^|[^0-9])((?:18|19|20)\d{2})([^0-9]|$)`)
-	episodeRE    = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])s(\d{1,2})[._-]?e(\d{1,3})(?:[-~]e(\d{1,3}))?(?:[^a-z0-9]|$)`)
-	episodeXRE   = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(\d{1,2})x(\d{1,3})(?:[^a-z0-9]|$)`)
-	cjkEpisodeRE = regexp.MustCompile(`第\s*\d+\s*[集话話]`)
-	resolutionRE = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(2160p|1080p|720p|540p|480p|4k|8k)(?:[^a-z0-9]|$)`)
-	dimensionRE  = regexp.MustCompile(`(?i)\b\d{3,4}[x×]\d{3,4}p?\b`)
-	groupRE      = regexp.MustCompile(`-([A-Za-z0-9]{2,})$`)
-	ratingRE     = regexp.MustCompile(`豆瓣\s*\d+(?:\.\d+)?`)
-	longDigitsRE = regexp.MustCompile(`\d{8,}`)
+	yearRE         = regexp.MustCompile(`(^|[^0-9])((?:18|19|20)\d{2})([^0-9]|$)`)
+	episodeRE      = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])s(\d{1,2})[._-]?e(\d{1,3})(?:[-~]e(\d{1,3}))?(?:[^a-z0-9]|$)`)
+	multiEpisodeRE = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])s(\d{1,2})[._-]?e(\d{1,3})((?:[._~-]?e\d{1,3})+)(?:[^a-z0-9]|$)`)
+	tailEpisodeRE  = regexp.MustCompile(`(?i)([._~-]?)e(\d{1,3})`)
+	episodeXRE     = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(\d{1,2})x(\d{1,3})(?:[^a-z0-9]|$)`)
+	cjkEpisodeRE   = regexp.MustCompile(`第\s*\d+\s*[集话話]`)
+	resolutionRE   = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(2160p|1080p|720p|540p|480p|4k|8k)(?:[^a-z0-9]|$)`)
+	dimensionRE    = regexp.MustCompile(`(?i)\b\d{3,4}[x×]\d{3,4}p?\b`)
+	groupRE        = regexp.MustCompile(`-([A-Za-z0-9]{2,})$`)
+	ratingRE       = regexp.MustCompile(`豆瓣\s*\d+(?:\.\d+)?`)
+	longDigitsRE   = regexp.MustCompile(`\d{8,}`)
 )
 
 var sourceTokens = []string{
@@ -130,7 +132,12 @@ func Parse(relativePath string) Hints {
 		h.Group = m[1]
 	}
 
-	if m := episodeRE.FindStringSubmatch(stem); m != nil {
+	multiSeasonEpisode, multiMatched := parseMultiEpisode(stem)
+	if multiMatched {
+		// An invalid repeated-E form (for example S01E01E03) must suppress the
+		// ordinary S01E01 match; otherwise it would still be classified as TV.
+		h.SeasonEpisode = multiSeasonEpisode
+	} else if m := episodeRE.FindStringSubmatch(stem); m != nil {
 		h.SeasonEpisode = "S" + m[1] + "E" + m[2]
 		if m[3] != "" {
 			h.SeasonEpisode += "-E" + m[3]
@@ -159,6 +166,58 @@ func Parse(relativePath string) Hints {
 	h.YearCandidates = years
 	h.TitleCandidates = candidates(titlePart)
 	return h
+}
+
+// parseMultiEpisode recognizes repeated E segments. The first return value is
+// the canonical range; matched reports whether a repeated-E form was present,
+// even when it is rejected as non-contiguous. A rejected form returns an empty
+// range so the caller suppresses the ordinary SxxExx match.
+func parseMultiEpisode(stem string) (string, bool) {
+	m := multiEpisodeRE.FindStringSubmatch(stem)
+	if m == nil {
+		return "", false
+	}
+	season, err := strconv.Atoi(m[1])
+	if err != nil {
+		return "", true
+	}
+	first, err := strconv.Atoi(m[2])
+	if err != nil {
+		return "", true
+	}
+	tail := m[3]
+	parts := tailEpisodeRE.FindAllStringSubmatch(tail, -1)
+	if len(parts) == 0 {
+		return "", true
+	}
+	numbers := make([]int, 0, len(parts)+1)
+	numbers = append(numbers, first)
+	hasRangeSuffix := false
+	for index, part := range parts {
+		separator := part[1]
+		number, err := strconv.Atoi(part[2])
+		if err != nil {
+			return "", true
+		}
+		if separator == "-" || separator == "~" {
+			// Only the classic "S01E01-E03" form is an explicit range. A dash
+			// after multiple E segments is ambiguous and must stay unplanned.
+			if index != 0 || len(parts) != 1 {
+				return "", true
+			}
+			hasRangeSuffix = true
+		}
+		numbers = append(numbers, number)
+	}
+	if !hasRangeSuffix {
+		for index := 1; index < len(numbers); index++ {
+			if numbers[index] != numbers[index-1]+1 {
+				return "", true
+			}
+		}
+	}
+	last := numbers[len(numbers)-1]
+	return fmt.Sprintf("S%02dE%02d-E%02d", season, first, last), true
 }
 
 // parseEpisodeX accepts "1x01" only when it looks like an episode marker.

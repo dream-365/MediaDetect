@@ -3,10 +3,21 @@ type: changelog
 status: Published
 owner: alang
 depends_on: []
-updated_at: 2026-11-11
+updated_at: 2026-11-12
 ---
 
 # Changelog: SPEC-001 MediaDetect 媒体检测库与 CLI
+
+## [2026-11-12] - SPEC-003 G6 连续多集解析
+
+- **修改类型**: Changed
+- **影响范围**: §2.1 G2；§4.5.1.1；附录 B；`tasks.md` 的 `spec_sha256`
+- **变更原因**: SPEC-003 G6 需要修复 `S01E01E02`/`S01E01E02E03` 多集解析，并同步 `title_candidates` 清理与 `v0.2.1` 版本口径。按 CLAUDE.md，先把本 Spec 状态回退为 `In Review`、更新 `updated_at`、记录变更；回退期间不修改生产代码。
+- **具体内容**:
+  - 连续多集按**集号数值连续**识别，输出 `S01E01-E02`/`S01E01-E03`，按 `tv_episode` 分类
+  - 非连续 `S01E01E03`/`S01E01E02E04` 仍不匹配，保持 movie，由技能层标记 `unsupported_multi_episode`
+  - `mapping.go` 的 `displayTitles`/`stripEpisode` 同步剥离 2 段/3 段连续 E 段，`title_candidates` 不含 `E02E03`
+  - 版本口径改为 `v0.2.1`；完成实现与验证后恢复 `Approved`
 
 ## [2026-11-11] - 修正交叉引用
 
