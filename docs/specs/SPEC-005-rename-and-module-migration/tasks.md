@@ -1,6 +1,6 @@
 ---
 type: tasks
-status: Draft
+status: In Progress
 owner: alang
 depends_on: []
 spec: ./spec.md
