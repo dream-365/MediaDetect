@@ -345,7 +345,7 @@ SMB/NFS 文件系统可能既不支持原子 no-replace，也不支持硬链接�
 
 任何 Go 项目都可以通过 `require github.com/dream-365/MediaTitle vX.Y.Z` 使用本模块。v0.3.0 起根包位于 `github.com/dream-365/MediaTitle/mediadetect`，公开包还包括 `parser`、`probe`、`tmdb` 和 `matcher`；`collect`、`llm` 自 v0.2.0 起位于 `internal/`，只能由本模块与 CLI 使用。本仓库不包含任何下游项目的包装代码。
 
-旧 module path 的已发布 pin 版本（含 v0.2.2）仍可安装；v0.3.0 之后旧路径的 `@latest` 不再支持，因为同一仓库的 tag 会解析到声明新路径的版本。
+旧 module path 的已发布 pin 版本（含 v0.2.2）仍可安装。旧路径的 `@latest` 行为取决于解析模式：`GOPROXY=direct` 下会解析到 v0.3.0 并报路径不一致，部分代理仍解析到 v0.2.2；需要旧版本时请固定 `@v0.2.2`。
 
 ## License 与 TMDB
 

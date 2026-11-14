@@ -1,6 +1,6 @@
 ---
 type: spec
-status: Approved
+status: Implemented
 owner: alang
 depends_on:
   - docs/specs/SPEC-001-media-type-detection/spec.md
@@ -37,13 +37,13 @@ updated_at: 2026-11-14
 
 **失败链一：新名字无法作为安装坐标。** 读者通过 `MediaTitle` 找到仓库 → README 首屏给出的第一条命令是 `go install github.com/dream-365/MediaDetect/cmd/mediadetect@...` → 读者若按仓库名替换路径，Go 因 `go.mod` 声明路径与请求路径不一致而拒绝 → 安装失败，或误判项目不可用。
 
-**失败链二：旧 `@latest` 在迁移后必然失效，而不是「可能失效」。** Go 代理按仓库范围关联 tag，不按 tag 内 `go.mod` 声明的路径过滤 → v0.3.0 发布后，旧路径 `@latest` 会选中 v0.3.0 → 拉取 `.mod` 时发现声明的是新路径 → 报 `module declares its path as ... but was required as ...`。已用本地 file proxy 复现：`go list -m old@latest` 返回 v0.3.0，`go install old/cmd@latest` 失败；旧 pin 版本 `@v0.2.2` 不受影响。因此「先观察再决定」不成立，必须在发布前就把旧 `@latest` 定义为不再支持。
+**失败链二：旧 `@latest` 的行为不可控，取决于解析模式。** Go 代理对同仓库 tag 的归属并不一致：`GOPROXY=direct` 会选中最高 tag v0.3.0 → 拉取 `.mod` 后声明的是新路径 → 报 `module declares its path as ... but was required as ...`；部分标准代理（实测 goproxy.cn）仍把旧路径 `@latest` 解析到 v0.2.2。因此不能承诺旧 `@latest` 可用，文档必须要求固定版本。
 
 **失败链三：现有 CI 与忽略规则会静默破坏迁移。** `.gitignore:2` 的 `/mediadetect` 同时匹配将要新建的 `mediadetect/` 目录，批量 `git add` 会漏掉整个包；`.github/workflows/ci.yml:32` 的 `go build ./cmd/mediadetect` 默认把二进制写到当前目录的 `mediadetect`，与同名目录冲突后直接失败。修订前的方案没有把这两项纳入检查。
 
 **失败链四：产品入口与交付物错位。** 仓库首页、release 说明与安装示例都以 CLI 为第一入口，而实际产品入口是 `media-title` 技能；技能自身没有前置条件说明，`media_title.py` 默认在 `PATH` 中查找 `mediadetect`，缺失时才报错。
 
-**证据。** 维护者判断：「工具应该被分装在里面，不应该直接暴露，MediaTitle 更像是一个产品功能，而不只是一个工具。」仓库事实：28 个文件 / 71 行旧名引用；`README.md:15` 首屏即 CLI 安装命令；`git check-ignore --no-index` 命中 `mediadetect/doc.go`；scratch 复制后执行 `go build ./cmd/mediadetect` 返回 `build output "mediadetect" already exists and is a directory`；本地 file proxy 复现旧 `@latest` 解析到 v0.3.0 并报路径不一致。诚实记录：目前没有真实事故，也没有外部项目 `require` 旧路径。
+**证据。** 维护者判断：「工具应该被分装在里面，不应该直接暴露，MediaTitle 更像是一个产品功能，而不只是一个工具。」仓库事实：28 个文件 / 71 行旧名引用；`README.md:15` 首屏即 CLI 安装命令；`git check-ignore --no-index` 命中 `mediadetect/doc.go`；scratch 复制后执行 `go build ./cmd/mediadetect` 返回 `build output "mediadetect" already exists and is a directory`；发布后实测：旧 `@latest` 在 `GOPROXY=direct` 下解析到 v0.3.0 并报路径不一致，在 goproxy.cn 下仍解析到 v0.2.2。诚实记录：目前没有真实事故，也没有外部项目 `require` 旧路径。
 
 ### 1.3 重构/设计动机
 
@@ -74,7 +74,7 @@ updated_at: 2026-11-14
 - **G1 - 标识统一（架构/代码级）**：`go.mod`、全部 Go import、CI、README 与脚本提示统一使用 `github.com/dream-365/MediaTitle`。验收：`grep -rn "dream-365/MediaDetect" --exclude-dir=.git --exclude-dir=docs .` 返回 0 行；`go list ./...` 的 8 个包全部以新路径开头；`go build ./...`、`go vet ./...`、`go test ./...` 全部通过。
 - **G2 - 目录收敛（架构/代码级）**：15 个根级 Go 文件移入 `mediadetect/`，仓库根不再有 `.go` 文件；删除无活跃引用的 `scripts/mediadetect-title.sh`。验收：`find . -maxdepth 1 -name '*.go'` 为空；`git check-ignore -q --no-index mediadetect/doc.go` 返回非 0；`go build -o "$(mktemp -d)/mediadetect" ./cmd/mediadetect` 成功；`go list ./...` 仍为 6 个公开包 + 2 个 internal 包；技能测试与 CI 全绿。
 - **G3 - 产品入口收敛（工程效率级）**：README 首屏把 `media-title` 技能作为产品入口，CLI 与 Go 库标为「实现细节 / 扩展 API」；技能补充前置条件；仓库描述与 README 一级标题对齐 MediaTitle。验收：人工检查 README 首屏与目录结构；技能文档包含安装前置条件；`scripts/mediadetect-title.sh` 的引用只存在于历史 Spec。
-- **G4 - 新路径可安装、旧 pin 版本可用、发布资产完整（可靠性/运维级）**：在迁移后的提交上发布 v0.3.0，并产出与 v0.2.2 同类的 release 资产。验收：`go install github.com/dream-365/MediaTitle/cmd/mediadetect@v0.3.0` 在全新 `GOMODCACHE` 下成功；`go install github.com/dream-365/MediaDetect/cmd/mediadetect@v0.2.2` 仍成功；旧路径 `@latest` 的预期失败被记录而非当作回归；4 个平台二进制、技能压缩包与 `checksums.txt` 齐备。
+- **G4 - 新路径可安装、旧 pin 版本可用、发布资产完整（可靠性/运维级）**：在迁移后的提交上发布 v0.3.0，并产出与 v0.2.2 同类的 release 资产。验收：`go install github.com/dream-365/MediaTitle/cmd/mediadetect@v0.3.0` 在全新 `GOMODCACHE` 下成功；`go install github.com/dream-365/MediaDetect/cmd/mediadetect@v0.2.2` 仍成功；旧路径 `@latest` 在 direct 与代理模式下的实测结果均被记录，且文档要求固定版本；4 个平台二进制、技能压缩包与 `checksums.txt` 齐备。
 - **G5 - 契约不变（可靠性/运维级）**：JSON Schema 版本仍为 `"1"`，检测与匹配行为、错误码、退出码不变；技能版本保持 0.1.1。验收：既有 Go 测试与 `python3 -m unittest discover -s skills/media-title/tests` 全部通过；`--version` 的 `schema_version` 仍为 `"1"`。
 
 ### 2.2 非目标
@@ -136,7 +136,7 @@ graph TD
 * **根包下沉，而非保留平铺**：仓库根只保留模块元数据与产品目录；包名仍为 `mediadetect`，符号不变。新目录与二进制同名，必须同时修正 `.gitignore` 与 CI 的 `-o` 输出。
 * **文档入口收敛，而非把 CLI 内部化**：把 CLI 移入 `internal/` 会破坏 `go install` 与技能安装路径，超出本次范围。因此统一称 CLI 为「实现细节」，避免与 Go 的 `internal/` 语义混淆。
 * **合并后立即打 tag**：tag 是发布闸门，不是发布后的观察结果；若等待 24 小时再打，README 会在这段时间里宣传一个不存在的版本。
-* **旧 `@latest` 明确不支持**：同一仓库的 tag 会被代理同时归属到新旧路径，无法让两者都指向正确版本；发布说明必须写明旧 `@latest` 不再可用，旧 pin 版本不受影响。
+* **旧 `@latest` 不作兼容承诺**：同一仓库的 tag 在不同解析模式下可能归属到不同路径，无法让新旧 `@latest` 同时可靠；发布说明要求固定版本，旧 pin 版本不受影响。
 * **各方案的详细对比与取舍见第 7 章。**
 
 ## 4. 详细设计
@@ -213,13 +213,13 @@ sequenceDiagram
     C-->>M: 全绿
     M->>T: 合并后立即创建 v0.3.0
     M->>G: 交叉编译 4 平台 + 技能包 + checksums + release 说明
-    M->>M: 全新缓存下验证新路径安装、旧 pin 安装、旧 @latest 预期失败
+    M->>M: 全新缓存下验证新路径安装、旧 pin 安装、旧 @latest 在 direct 与代理模式下的行为
     alt 安装或契约验证失败
         M->>T: 不删除 v0.3.0，发布 v0.3.1
     else CI 失败
         M->>R: revert 对应提交并重跑 CI
     else 旧 @latest 报路径不一致
-        M->>M: 记录为预期结果，release 说明写明不再支持
+        M->>M: 记录实测结果；release 说明要求固定版本，不承诺 @latest
     end
 ```
 
@@ -232,7 +232,7 @@ sequenceDiagram
 | 改路径后 CI 报私有依赖 | 白名单与临时消费者模块的路径必须同批更新；以 `go list -deps` 输出为准逐条核对 |
 | 新 tag 创建后发现安装失败 | 不删除、不移动 v0.3.0；修复后发布 v0.3.1，并在 changelog 记录 |
 | tag 推送失败 | 不创建 Release、不对外宣布；修复后重推同一 tag。若短期无法修复，revert commit 3，使 README 回到 v0.2.2 的安装坐标 |
-| 旧路径 `@latest` 报 path mismatch | 预期行为；release 说明与 README 明确旧 `@latest` 不再支持，旧 pin 版本不受影响 |
+| 旧路径 `@latest` 报 path mismatch | `direct` 模式下的已知行为；代理模式可能仍解析到旧 pin。两种结果都记录，文档要求固定版本 |
 | 需要恢复旧 `@latest` | 只能在旧路径发布高于 v0.3.0 的版本（如 v0.3.1），代价是新路径同时不可用；二者不能并存 |
 | pkg.go.dev 尚未索引新路径 | 不作为阻塞条件；在 changelog 记录索引状态，索引后复查 |
 | 技能测试因二进制缺失失败 | 属于本地环境问题；CI 通过 `MD_BIN` 注入，不修改测试语义 |
@@ -242,7 +242,7 @@ sequenceDiagram
 * 所有导入路径前缀变更：根包变为 `.../MediaTitle/mediadetect`，领域包变为 `.../MediaTitle/{parser,probe,tmdb,matcher}`。
 * 不提供旧路径别名、转发 shim 或第二个 module；Go 没有等价的模块别名机制，跨仓库 shim 只会引入新的维护面。
 * 旧 pin 版本（`@v0.2.2` 及更早）继续可用，因为那些 tag 的 `go.mod` 不可变。
-* 旧路径 `@latest` 在 v0.3.0 之后不再可用；这是迁移的已知代价，不是缺陷。
+* 旧路径 `@latest` 不作兼容承诺：`direct` 模式下会失败，部分代理仍解析到旧 pin；需要旧版本时固定 `@v0.2.2`。
 * 二进制名、JSON 契约与环境变量前缀不变，v0.2.2 的技能仍可与新版 `mediadetect` 通信（Schema `"1"`）。
 
 ## 5. 非功能性需求
@@ -257,7 +257,7 @@ sequenceDiagram
 ### 5.2 兼容性
 
 * **旧 pin 版本可安装**：已发布 tag 的 `go.mod` 不可变，v0.2.2 及更早版本在迁移后仍可安装；可用性依赖代理缓存或 GitHub 旧名重定向。
-* **旧 `@latest` 明确不支持**：tag 创建后，旧路径 `@latest` 预期解析到 v0.3.0 并报路径不一致；必须实测记录，且文档不得再宣传旧 `@latest`。
+* **旧 `@latest` 不作兼容承诺**：tag 创建后实测，`GOPROXY=direct` 解析到 v0.3.0 并报路径不一致，goproxy.cn 仍解析到 v0.2.2；文档不得宣传旧 `@latest`，必须要求固定版本。
 * **路径大小写**：module path 大小写敏感；代理转义为 `!media!title`，文档示例必须精确匹配。
 * **契约稳定**：JSON Schema 版本、错误码、退出码与检测结果不变。
 
@@ -275,7 +275,7 @@ sequenceDiagram
 ### 5.5 发布完整性
 
 * **资产齐全**：4 个平台二进制、技能压缩包与 `checksums.txt` 与 v0.2.2 保持一致；checksums 可由 `sha256sum -c` 校验。
-* **说明一致**：release 说明包含新安装坐标、旧 `@latest` 不再支持的提示，以及 JSON Schema `"1"` 的兼容说明。
+* **说明一致**：release 说明包含新安装坐标、旧 `@latest` 不作兼容承诺并要求固定版本的提示，以及 JSON Schema `"1"` 的兼容说明。
 
 ## 6. 上线与迁移计划
 
@@ -302,7 +302,7 @@ sequenceDiagram
 * **无数据迁移**：仓库无持久化数据，迁移只涉及源码、文档与发布坐标。
 * **旧 tag 保持只读**：不修改、不删除、不重打 v0.1.0–v0.2.2。
 * **单路径发布**：v0.3.0 起只使用新 module path，不为同一版本维护双路径。
-* **旧 `@latest`**：v0.3.0 之后不再可用，属于已知且已声明的兼容性变化。
+* **旧 `@latest`**：行为取决于解析模式，不作兼容承诺；需要旧版本时固定 `@v0.2.2`。
 * **旧路径窗口**：暂不承诺维护分支（NG7）；若出现外部下游，再评估补发旧路径维护版本。
 
 ### 6.3 上线验证与冒烟
@@ -330,7 +330,7 @@ sequenceDiagram
 **触发条件（任一满足即回滚）：**
 
 * 合并后 macOS 或 Linux CI 任一矩阵失败且 30 分钟内无法修复。
-* v0.3.0 在新缓存下安装失败，或 `go list -m` 返回路径不一致（旧 `@latest` 的预期失败除外）。
+* v0.3.0 在新缓存下安装失败，或 `go list -m` 返回路径不一致（旧 `@latest` 在 `direct` 模式下的失败属已知行为，不算回归）。
 * 技能测试套件失败，或 `--version` / JSON 契约发生变化。
 * 发现公开包数量、公开 API 或行为与迁移前不一致。
 * Release 资产上传失败或 checksums 校验失败：重新上传同一 tag 的资产即可；仅当二进制本身不可用时才进入 v0.3.1 流程。
@@ -390,10 +390,10 @@ sequenceDiagram
 | 下游影响 | 无 | 无 | 高 | 中 | 高 | 中 | 中（无外部下游） |
 | 回滚难度 | 无 | 低 | 高 | 低 | 中 | 高 | 低（三个独立提交） |
 | 目录与产品定位 | 未解决 | 部分 | 部分 | 未解决 | 过度 | 未解决 | **是** |
-| 旧 `@latest` 可并存 | 是 | 是 | 是 | 否 | 否 | 否 | 否（已声明） |
+| 旧 `@latest` 可并存 | 是 | 是 | 是 | 否 | 否 | 否 | 部分（取决于代理） |
 
 ## 附录 A：未决问题
 
 * **Q1**：旧 module path 是否需要保留一个维护窗口（例如在 v0.3.x 期间补发旧路径构建）？当前依 NG7 推迟，等出现首个外部下游再评估。
 * **Q2**：产品显示名与二进制名最终是否也改为 MediaTitle / `mediatitle`？本次依 NG2 保持不变；若改，需要单独的破坏性变更 Spec。
-* **Q3**：旧路径 `@latest` 已在本地 file proxy 复现为预期失败；tag 后仍需在真实代理上复核一次，并把错误原文记入 `changelog.md`。
+* **Q3**：旧路径 `@latest` 已实测：`GOPROXY=direct` 解析到 v0.3.0 并报路径不一致，goproxy.cn 仍解析到 v0.2.2；实测结果已记入 `changelog.md`。是否需要额外维护旧路径的固定版本入口，留待首个外部下游出现后再评估。

@@ -49,3 +49,18 @@ updated_at: 2026-11-14
 - **影响范围**: T1–T5 的代码与文档实现
 - **变更原因**: 按 Approved Spec 完成三个可独立构建的代码提交，并做发布前本地验证
 - **具体内容**: 代码提交 `7969e9d`（module path 与 CI）、`45beead`（根包下沉、忽略规则、删除遗留脚本）、`015531a`（产品入口与 0.3.0）；本地 CI 全真模拟通过（tidy/test/vet/build -o/依赖白名单/包计数/边界/internal 守卫/忽略规则）；技能测试 108 通过、1 跳过；v0.3.0 的 4 平台二进制、技能包与 `checksums.txt` 已在临时目录生成并校验。远端 CI、推送、tag 与安装验证待执行
+
+## [2026-11-14] - 发布后实测：回退为 In Review
+
+- **修改类型**: Changed
+- **影响范围**: 1.2、2.1 G4、3.4、4.5、4.6、4.7、5.2、5.5、6.2、6.3、6.4、7.7、附录 A Q3
+- **变更原因**: v0.3.0 发布后实测发现，旧路径 `@latest` 的行为取决于解析模式，原 Spec 的「必然失效」结论过强
+- **实测结果**: tag `v0.3.0` 指向 `6a19aa2`，main CI run `43563804444` 成功；新路径 `@v0.3.0` 在全新缓存下安装成功并输出 `0.3.0` / schema `1`；旧 pin `@v0.2.2` 安装成功并输出 `0.2.2`；旧 `@latest` 在 `GOPROXY=direct` 下解析到 v0.3.0 并报 `module declares its path as ... but was required as ...`，在 goproxy.cn 下仍解析到 v0.2.2 并安装成功；新路径 `@latest` 解析到 v0.3.0；pkg.go.dev 新路径返回 200
+- **具体内容**: 按 CLAUDE.md 将状态回退为 `In Review`；将「必然失效」改为「取决于解析模式」；把「不再支持」改为「不作兼容承诺、要求固定版本」；同步 Release 说明与 README 口径。回退期间不修改生产代码
+
+## [2026-11-14] - 修订批准并标记 Implemented
+
+- **修改类型**: Changed
+- **影响范围**: frontmatter 状态、tasks 状态、发布验证记录
+- **变更原因**: 维护者批准实测修正；实现与发布已完成
+- **具体内容**: Spec 状态改为 `Implemented`，tasks 改为 `Done`；记录 v0.3.0 Release 资产远端大小与本地完全一致；`media-title-skill_v0.3.0.tar.gz` 已下载并通过 checksums 校验；4 个二进制因本机到 `release-assets.githubusercontent.com` 的 TLS 超时未能完整下载，校验需在正常网络环境复核
