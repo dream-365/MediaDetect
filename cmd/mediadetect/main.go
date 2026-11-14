@@ -10,7 +10,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/dream-365/MediaTitle"
+	"github.com/dream-365/MediaTitle/mediadetect"
 )
 
 func main() {

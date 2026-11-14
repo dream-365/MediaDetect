@@ -30,6 +30,13 @@ jobs:
         run: go vet ./...
       - name: go build
         run: go build -o "$RUNNER_TEMP/mediadetect" ./cmd/mediadetect
+      - name: ignore rule
+        shell: bash
+        run: |
+          if git check-ignore -q --no-index mediadetect/doc.go; then
+            echo "mediadetect/ is ignored by .gitignore"
+            exit 1
+          fi
       - name: no private dependency
         shell: bash
         run: |
@@ -51,7 +58,7 @@ jobs:
             echo "domain package imports internal"
             exit 1
           fi
-          if grep -Eq '"github.com/dream-365/MediaTitle/(probe|matcher)"' result.go; then
+          if grep -Eq '"github.com/dream-365/MediaTitle/(probe|matcher)"' mediadetect/result.go; then
             echo "result.go imports probe/matcher"
             exit 1
           fi

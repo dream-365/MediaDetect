@@ -6,7 +6,7 @@ import (
 	"runtime/debug"
 	"strings"
 
-	"github.com/dream-365/MediaTitle"
+	"github.com/dream-365/MediaTitle/mediadetect"
 	"github.com/dream-365/MediaTitle/internal/llm"
 )
 
