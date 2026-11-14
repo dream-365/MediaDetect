@@ -1,10 +1,10 @@
 ---
 type: tasks
-status: In Progress
+status: Done
 owner: alang
 depends_on: []
 spec: ./spec.md
-spec_sha256: "f42ecb4547a00784b8f65c5de5db002de281acb63122926f58619e46143193a9"
+spec_sha256: "52102467741899a206470fe04ac55166956cdbdfd52b680a2212d3f92694b716"
 updated_at: 2026-11-14
 ---
 
