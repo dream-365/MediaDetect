@@ -1,4 +1,4 @@
-module github.com/dream-365/MediaDetect
+module github.com/dream-365/MediaTitle
 
 go 1.27.1
 

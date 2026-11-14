@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/dream-365/MediaDetect"
+	"github.com/dream-365/MediaTitle"
 )
 
 func writeVersion(w io.Writer, pretty bool) {

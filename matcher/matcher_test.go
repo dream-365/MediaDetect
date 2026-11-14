@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/dream-365/MediaDetect/parser"
-	"github.com/dream-365/MediaDetect/tmdb"
+	"github.com/dream-365/MediaTitle/parser"
+	"github.com/dream-365/MediaTitle/tmdb"
 )
 
 func clientFor(t *testing.T, body string) *tmdb.Client {

@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/dream-365/MediaDetect/probe"
+	"github.com/dream-365/MediaTitle/probe"
 )
 
 func TestDetectNoKeyAutoDegrades(t *testing.T) {

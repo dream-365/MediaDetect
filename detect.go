@@ -11,8 +11,8 @@ import (
 
 	"golang.org/x/text/unicode/norm"
 
-	"github.com/dream-365/MediaDetect/internal/collect"
-	"github.com/dream-365/MediaDetect/probe"
+	"github.com/dream-365/MediaTitle/internal/collect"
+	"github.com/dream-365/MediaTitle/probe"
 )
 
 // detectSkipNames are always skipped by the CLI. Callers that use collect

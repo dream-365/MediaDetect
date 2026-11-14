@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/dream-365/MediaDetect"
+	"github.com/dream-365/MediaTitle"
 )
 
 type cliError struct {

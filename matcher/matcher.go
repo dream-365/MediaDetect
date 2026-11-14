@@ -13,8 +13,8 @@ import (
 
 	"github.com/siongui/gojianfan"
 
-	"github.com/dream-365/MediaDetect/parser"
-	"github.com/dream-365/MediaDetect/tmdb"
+	"github.com/dream-365/MediaTitle/parser"
+	"github.com/dream-365/MediaTitle/tmdb"
 )
 
 // Scored is one evaluated candidate.

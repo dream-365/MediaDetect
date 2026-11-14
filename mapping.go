@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/dream-365/MediaDetect/parser"
+	"github.com/dream-365/MediaTitle/parser"
 )
 
 type fileType struct {

@@ -15,8 +15,8 @@ import (
 
 	"golang.org/x/text/unicode/norm"
 
-	"github.com/dream-365/MediaDetect/parser"
-	"github.com/dream-365/MediaDetect/probe"
+	"github.com/dream-365/MediaTitle/parser"
+	"github.com/dream-365/MediaTitle/probe"
 )
 
 // Sentinel errors let callers map the failure to their own error codes.

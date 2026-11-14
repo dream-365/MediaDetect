@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dream-365/MediaDetect/matcher"
-	"github.com/dream-365/MediaDetect/tmdb"
+	"github.com/dream-365/MediaTitle/matcher"
+	"github.com/dream-365/MediaTitle/tmdb"
 )
 
 func tmdbServer(t *testing.T, search func(query string) []map[string]any, details map[int]map[string]any) *httptest.Server {

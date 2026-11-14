@@ -6,8 +6,8 @@ import (
 	"runtime/debug"
 	"strings"
 
-	"github.com/dream-365/MediaDetect"
-	"github.com/dream-365/MediaDetect/internal/llm"
+	"github.com/dream-365/MediaTitle"
+	"github.com/dream-365/MediaTitle/internal/llm"
 )
 
 // defaultVersion is used for local builds where no release version is
