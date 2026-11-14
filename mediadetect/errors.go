@@ -1,6 +1,6 @@
 package mediadetect
 
-import "github.com/dream-365/MediaDetect/probe"
+import "github.com/dream-365/MediaTitle/probe"
 
 // ErrProbeUnavailable reports that the configured prober could not read
 // technical metadata. It is the same sentinel as probe.ErrUnavailable, so

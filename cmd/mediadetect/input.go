@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/dream-365/MediaDetect"
+	"github.com/dream-365/MediaTitle/mediadetect"
 )
 
 func resolveInput(positional []string, stdin io.Reader) (string, *cliError) {

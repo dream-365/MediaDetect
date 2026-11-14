@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dream-365/MediaDetect/parser"
-	"github.com/dream-365/MediaDetect/tmdb"
+	"github.com/dream-365/MediaTitle/parser"
+	"github.com/dream-365/MediaTitle/tmdb"
 )
 
 // TestTMDBTitleYearCalibration runs the Phase 0 corpus against the live TMDB

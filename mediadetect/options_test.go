@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/dream-365/MediaDetect/probe"
+	"github.com/dream-365/MediaTitle/probe"
 )
 
 func TestMediaInfoConversion(t *testing.T) {

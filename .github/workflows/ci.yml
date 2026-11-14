@@ -29,13 +29,20 @@ jobs:
       - name: go vet
         run: go vet ./...
       - name: go build
-        run: go build ./cmd/mediadetect
+        run: go build -o "$RUNNER_TEMP/mediadetect" ./cmd/mediadetect
+      - name: ignore rule
+        shell: bash
+        run: |
+          if git check-ignore -q --no-index mediadetect/doc.go; then
+            echo "mediadetect/ is ignored by .gitignore"
+            exit 1
+          fi
       - name: no private dependency
         shell: bash
         run: |
           if go list -deps ./cmd/mediadetect \
             | grep '^github.com/dream-365/' \
-            | grep -v '^github.com/dream-365/MediaDetect'; then
+            | grep -v '^github.com/dream-365/MediaTitle'; then
             echo "private dependency detected"
             exit 1
           fi
@@ -51,7 +58,7 @@ jobs:
             echo "domain package imports internal"
             exit 1
           fi
-          if grep -Eq '"github.com/dream-365/MediaDetect/(probe|matcher)"' result.go; then
+          if grep -Eq '"github.com/dream-365/MediaTitle/(probe|matcher)"' mediadetect/result.go; then
             echo "result.go imports probe/matcher"
             exit 1
           fi
@@ -60,11 +67,11 @@ jobs:
           trap 'rm -rf "$tmp"' EXIT
           cd "$tmp"
           go mod init example.com/internal-probe
-          go mod edit -replace "github.com/dream-365/MediaDetect=${GITHUB_WORKSPACE}"
-          go mod edit -require github.com/dream-365/MediaDetect@v0.2.2
+          go mod edit -replace "github.com/dream-365/MediaTitle=${GITHUB_WORKSPACE}"
+          go mod edit -require github.com/dream-365/MediaTitle@v0.0.0
 
           for pkg in collect llm; do
-            printf '%s\n' 'package main' '' "import _ \"github.com/dream-365/MediaDetect/internal/${pkg}\"" '' 'func main() {}' > main.go
+            printf '%s\n' 'package main' '' "import _ \"github.com/dream-365/MediaTitle/internal/${pkg}\"" '' 'func main() {}' > main.go
             if output=$(GOFLAGS=-mod=mod go build ./... 2>&1); then
               echo "external import of internal/${pkg} unexpectedly succeeded"
               exit 1
@@ -94,7 +101,7 @@ jobs:
           version=$("$RUNNER_TEMP/mediadetect" --version)
           printf '%s\n' "$version"
           case "$version" in
-            *'"version":"0.2.2"'*) ;;
+            *'"version":"0.3.0"'*) ;;
             *) echo "unexpected version output"; exit 1 ;;
           esac
       - name: py_compile

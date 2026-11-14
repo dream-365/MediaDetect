@@ -6,14 +6,14 @@ import (
 	"runtime/debug"
 	"strings"
 
-	"github.com/dream-365/MediaDetect"
-	"github.com/dream-365/MediaDetect/internal/llm"
+	"github.com/dream-365/MediaTitle/mediadetect"
+	"github.com/dream-365/MediaTitle/internal/llm"
 )
 
 // defaultVersion is used for local builds where no release version is
 // recorded. version is overridable at build time with
 // -ldflags "-X main.version=x.y.z".
-const defaultVersion = "0.2.2"
+const defaultVersion = "0.3.0"
 
 var version string
 

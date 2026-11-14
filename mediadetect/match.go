@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dream-365/MediaDetect/internal/collect"
-	"github.com/dream-365/MediaDetect/matcher"
-	"github.com/dream-365/MediaDetect/tmdb"
+	"github.com/dream-365/MediaTitle/internal/collect"
+	"github.com/dream-365/MediaTitle/matcher"
+	"github.com/dream-365/MediaTitle/tmdb"
 )
 
 type movieGroup struct {

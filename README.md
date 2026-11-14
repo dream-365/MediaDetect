@@ -1,27 +1,48 @@
-# MediaDetect
+# MediaTitle
 
-MediaDetect 是一个无状态、只读的媒体类型检测库与 CLI。输入一个文件或目录，输出一个 JSON 对象，说明它是电影、剧集、季、系列、合集、非正片、附属文件还是其他类型；开启 TMDB 匹配时，还会返回最佳条目和 `imdb_id`。
+MediaTitle 是一个媒体库整理产品：由 `media-title` Agent Skill 交付，底层使用无状态、只读的 `mediadetect` 检测引擎。输入文件或目录，引擎输出 JSON，说明它是电影、剧集、季、系列、合集、非正片、附属文件还是其他类型；开启 TMDB 匹配时，还会返回最佳条目和 `imdb_id`。
 
 它不创建索引、不写 SQLite、不写缓存或临时文件，也不会修改输入目录中的任何文件。
 
-- 当前版本：`0.2.2`
+- 当前版本：`0.3.0`
 - JSON Schema 版本：`"1"`
 - 最低 Go 版本：`1.27.1`
 - License：[MIT](LICENSE)
 
-## 安装
+## 产品入口：media-title Skill
+
+MediaTitle 的产品形态是 `skills/media-title/` 技能。它扫描本地媒体库、生成整理计划，用户逐项确认后才执行，并保留可回滚的 intent/done 日志。
+
+前置条件：
+
+- Python 3.9+
+- `mediadetect` 在 `PATH` 中，或通过 `--md-bin` / `MD_BIN` 指定（安装见下一节）
+- 可选：`TMDB_API_KEY` 用于 TMDB 匹配
 
 ```bash
-go install github.com/dream-365/MediaDetect/cmd/mediadetect@v0.2.2
+python3 skills/media-title/scripts/media_title.py scan "/path/to/library" --json
+python3 skills/media-title/scripts/media_title.py plan --scan "<state_dir>/scan.json" --json
+python3 skills/media-title/scripts/media_title.py apply \
+  --plan "<state_dir>/plan.json" --expect-plan-id "<plan_id>" --select all --yes
 ```
 
-`go install` 会把二进制装到 `$(go env GOPATH)/bin/mediadetect`，不需要手写模块代理转义。
+完整工作流与安全约束见 [skills/media-title/SKILL.md](skills/media-title/SKILL.md)。
+
+## 安装检测引擎 mediadetect
+
+`mediadetect` 是 MediaTitle 的实现细节：技能通过子进程调用它，通常不需要最终用户直接操作。本仓库同时把它作为公开库与 CLI 发布。
+
+```bash
+go install github.com/dream-365/MediaTitle/cmd/mediadetect@v0.3.0
+```
+
+`go install` 会把二进制装到 `$(go env GOPATH)/bin/mediadetect`，不需要手写模块代理转义。module path 大小写敏感，代理转义形式为 `!media!title`。
 
 从源码构建：
 
 ```bash
-git clone https://github.com/dream-365/MediaDetect.git
-cd MediaDetect
+git clone https://github.com/dream-365/MediaTitle.git
+cd MediaTitle
 go build -o bin/mediadetect ./cmd/mediadetect
 ```
 
@@ -36,7 +57,7 @@ import (
 	"fmt"
 	"os"
 
-	mediadetect "github.com/dream-365/MediaDetect"
+	mediadetect "github.com/dream-365/MediaTitle/mediadetect"
 )
 
 func main() {
@@ -322,7 +343,9 @@ SMB/NFS 文件系统可能既不支持原子 no-replace，也不支持硬链接�
 
 ## 下游集成
 
-任何 Go 项目都可以通过 `require github.com/dream-365/MediaDetect vX.Y.Z` 使用本模块。公开包为根包 `mediadetect`、`parser`、`probe`、`tmdb` 和 `matcher`；`collect`、`llm` 自 v0.2.0 起位于 `internal/`，只能由本模块与 CLI 使用。本仓库不包含任何下游项目的包装代码。
+任何 Go 项目都可以通过 `require github.com/dream-365/MediaTitle vX.Y.Z` 使用本模块。v0.3.0 起根包位于 `github.com/dream-365/MediaTitle/mediadetect`，公开包还包括 `parser`、`probe`、`tmdb` 和 `matcher`；`collect`、`llm` 自 v0.2.0 起位于 `internal/`，只能由本模块与 CLI 使用。本仓库不包含任何下游项目的包装代码。
+
+旧 module path 的已发布 pin 版本（含 v0.2.2）仍可安装；v0.3.0 之后旧路径的 `@latest` 不再支持，因为同一仓库的 tag 会解析到声明新路径的版本。
 
 ## License 与 TMDB
 

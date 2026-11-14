@@ -10,8 +10,8 @@ import (
 
 	"golang.org/x/text/unicode/norm"
 
-	"github.com/dream-365/MediaDetect/parser"
-	"github.com/dream-365/MediaDetect/probe"
+	"github.com/dream-365/MediaTitle/parser"
+	"github.com/dream-365/MediaTitle/probe"
 )
 
 func write(t *testing.T, root, name string) string {

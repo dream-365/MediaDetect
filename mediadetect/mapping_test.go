@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/dream-365/MediaDetect/parser"
+	"github.com/dream-365/MediaTitle/parser"
 )
 
 func TestMapFile(t *testing.T) {
