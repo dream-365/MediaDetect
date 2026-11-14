@@ -8,6 +8,19 @@ updated_at: 2026-11-12
 
 # Changelog: SPEC-003 media-title 智能体技能
 
+## [2026-11-14] - v0.1.1 版本口径与验收修复
+
+- **修改类型**: Changed
+- **影响范围**: 目标版本；`metadata.version` 示例；`tool_version` 示例；§4.10；CI 版本断言；`tasks.md` 的 `spec_sha256`
+- **变更原因**: 完成 SPEC-004 T5 的 media-title `v0.1.1` 与 MediaDetect `v0.2.2` 收尾，并同步上一轮验收修复。按 CLAUDE.md，先把本 Spec 状态回退为 `In Review`、更新 `updated_at`、记录变更；修订后恢复 `Approved`。
+- **具体内容**:
+  - 目标版本改为 media-title `v0.1.1`、MediaDetect `v0.2.2`；保留 G6 的 `v0.2.1` 历史说明。
+  - `metadata.version` 与 `tool_version` 示例更新为 `0.1.1`；CI 版本断言更新为 `0.2.2`。
+  - §4.3.6 明确 medium planned 单元的 warning code 为 `medium_confidence`。
+  - §4.10 增加当前发布口径，明确 G6 历史版本与当前版本的区别。
+  - 同步上一轮验收修复：single 模式已整理跳过、A/B 连字符与 `1-2` 分卷、rollback SMB 提示。
+  - 重算 `tasks.md` 的 `spec_sha256`。
+
 ## [2026-11-12] - 初始草案
 
 - **修改类型**: Added
@@ -163,3 +176,158 @@ updated_at: 2026-11-12
   - precheck 增加跨单元 source/target 祖先-后代检查：目录 move 目标下再有其他单元的 mkdir/move 时返回 `E_TARGET_IN_SOURCE`，零改动；仅共享 mkdir 重叠允许。
   - multipart 过滤前移到任何 TMDB 调用与目录单元判定之前；目录级电影单元、`--mode single`、散落文件与子目录 movie 均先标记 `unsupported_multipart`。
   - Python 测试从 70 增至 80。
+
+## [2026-11-12] - SMB check-then-rename 降级需求（In Review）
+
+- **修改类型**: Changed
+- **影响范围**: §1.3；§2.1（新增 G7）；§4.2 apply/rollback 选项；§4.7.1；§4.7.2；新增 §4.7.4；§4.8；§4.11；§6.1；附录 A/B；`tasks.md`（T9）；`docs/specs/README.md`
+- **变更原因**: macOS 媒体库常放在 SMB 共享上；smbfs 上 `renamex_np(RENAME_EXCL)` 返回 ENOTSUP/EINVAL，`os.link` 不可用，导致 `probe_no_replace` 在预检阶段整体拒绝，一个文件都无法移动。用户要求提供显式 opt-in 的非原子降级路径，默认行为不变。
+- **具体内容**:
+  - 新增 G7 与 T9：能力分级探测 `renameat2`/`renamex_np` → `link+unlink`（仅文件）→ check-then-rename。
+  - `apply`/`rollback` 新增 `--no-replace strict|check`，默认 `strict`；`MEDIA_TITLE_ALLOW_CHECK_RENAME=1` 等价于 `check`，CLI 优先；不得按文件系统类型自动开启。
+  - `check` 模式：rename 前 `lexists(dst)`，存在即 `E_TARGET_EXISTS`；移动后文件校验 `size`/`mtime_ns`，目录校验 `mtime_ns` + 可移植子树指纹（不含 `dev/ino`）；失败保留现场并记录 `E_NON_ATOMIC_MOVE_FAILED`。
+  - intent/done 日志新增 `move_method`/`atomic`/`validation`；apply/rollback 结果与人类输出新增 `warning: non_atomic_move`。
+  - rollback 对含 `check_then_rename` 的日志必须显式 opt-in，否则 `E_NO_REPLACE_UNSUPPORTED`、零改动；反向移动沿用可移植指纹，二次回滚幂等。
+  - `SKILL.md` 安全条款、4.11、附录 B 明确写出检查与 rename 之间的竞态风险；默认 strict 行为保持不变。
+  - 测试新增 mock：`renamex_np`/`renameat2` 返回 ENOTSUP/EINVAL、`os.link` 抛 EPERM；默认拒绝、显式开启成功、目标存在不覆盖、size/mtime/指纹失败、rollback opt-in。
+  - 状态按 CLAUDE.md 回退为 `In Review`，等待用户批准后再实现；回退期间不改生产代码。
+
+## [2026-11-12] - 批准 G7/T9
+
+- **修改类型**: Approved
+- **影响范围**: SPEC-003 spec/tasks 状态；`docs/specs/README.md`
+- **变更原因**: 用户明确批准 SMB check-then-rename 降级需求。
+- **具体内容**:
+  - SPEC-003 与 `tasks.md` 恢复为 `Approved`；新增 G7/T9 进入实现。
+  - 实现 T9：能力分级探测、`--no-replace strict|check`、`MEDIA_TITLE_ALLOW_CHECK_RENAME=1`、check-then-rename、日志/告警、rollback 可移植指纹与 mock 测试。
+
+## [2026-11-12] - T9 实现完成
+
+- **修改类型**: Implemented
+- **影响范围**: `skills/media-title/scripts/media_title_lib/{fsops,paths,apply,rollback}.py`、`scripts/media_title.py`、`SKILL.md`、`tests/test_fsops.py`、`tests/test_regressions.py`
+- **变更原因**: 完成 G7/T9，使 SMB/NFS 用户可显式选择非原子 check-then-rename，默认 strict 行为不变。
+- **具体内容**:
+  - `fsops.safe_move` 返回 `method`/`atomic`/`validation`；能力探测返回 `native`/`link_unlink`/`check_then_rename`。
+  - `check` 模式：`lexists` 检查后普通 `rename`；文件校验 `size`/`mtime_ns`，目录校验顶层 `mtime_ns` + 可移植子树指纹（不含 `dev/ino`）；失败尝试恢复源并报 `E_NON_ATOMIC_MOVE_FAILED`。
+  - apply/rollback 新增 `--no-replace strict|check` 与 `MEDIA_TITLE_ALLOW_CHECK_RENAME=1`，CLI 优先；结果与人类输出含 `non_atomic_move` warning。
+  - apply.log/rollback.log 的 move intent/done 记录 `move_method`/`atomic`/`validation`；rollback 对 check 日志未 opt-in 时零改动拒绝。
+  - `SKILL.md` 安全条款与调用示例更新，明确禁止智能体自行启用。
+  - Python 测试从 80 增至 89，覆盖 ENOTSUP/EPERM mock、默认拒绝、显式成功、不覆盖、目录 check、探测、校验失败恢复、rollback opt-in 与 CLI/env 优先级。
+
+## [2026-11-12] - 分卷误判修复与 Part N 策略（In Review）
+
+- **修改类型**: Changed
+- **影响范围**: §2.1 G2；§4.4.2（分卷 token 表与新增 4.4.2.1）；§4.9；§6.1；附录 A/B；`tasks.md`（T10）；`docs/specs/README.md`
+- **变更原因**: `MULTIPART_RES[4]` 将普通标题中的冠词/介词 `A`/`B` 当作字母分卷；`MULTIPART_RES[1]` 将发行组 `PTH` 拆成 `pt`+`h`；`後編` 等续集标题被误判。另有 `Part N` 既可能是真拆盘，也可能是独立电影，需要产品决策。
+- **具体内容**:
+  - 字母后缀只匹配文件名主干（去掉扩展名和发布标签后）末尾的 `A`/`B`；`A.City.of.Sadness`、`B.for.Busy`、`Story.of.a.Murderer` 不再命中。
+  - `part/pt` 后必须跟分隔符或数字；`PTH`/`PTer` 不再命中；`Part.1`/`Part1`/`pt2` 保持命中。
+  - `前編/後編` 不加入硬分卷词，`3月のライオン.後編` 按普通电影处理。
+  - 新增 4.4.2.1：`Part N`（数字）作为候选，不立即 unplanned；必须使用真实 TMDB best（非 local），且 `title`/`original_title` 归一化后包含对应 `part N`，才按独立电影处理；否则保持 `unplanned/unsupported_multipart`。
+  - 单文件、目录、movie 分组使用同一判定；`--match=off`、`disabled`、`unavailable`、`error` 或本地 best 时 Part N 仍 unplanned。
+  - 硬分卷（CD/Disc/Disk、1of2、上下/前后、Part.A/B、主干末尾 A/B）保持拒绝；Part N 例外不影响同一 TMDB id/目标冲突的计划级 unplanned。
+  - 状态按 CLAUDE.md 回退为 `In Review`，等待用户批准 T10 后再改生产代码。
+
+## [2026-11-12] - 批准 T10
+
+- **修改类型**: Approved
+- **影响范围**: SPEC-003 spec/tasks 状态；`docs/specs/README.md`
+- **变更原因**: 用户批准分卷误判修复与 Part N TMDB 判定策略。
+- **具体内容**:
+  - SPEC-003 与 `tasks.md` 恢复为 `Approved`；T10 进入实现。
+  - 实现 A/B 主干末尾匹配、`Part/Pt` 分隔符约束、`PTH`/`後編` 假阳性修复，以及 Part N 的真实 TMDB 标题证明与统一扫描判定。
+
+## [2026-11-12] - T10 实现完成
+
+- **修改类型**: Implemented
+- **影响范围**: `skills/media-title/scripts/media_title_lib/{paths,scan}.py`、`tests/test_paths.py`、`tests/test_regressions.py`
+- **变更原因**: 完成分卷误判修复与 Part N 独立电影判定。
+- **具体内容**:
+  - `MULTIPART_RES` 拆分为硬分卷规则与 `MULTIPART_PART_RE`；A/B 只在去掉扩展名/发布标签后的主干末尾命中。
+  - `Part/Pt` 后必须有分隔符或数字，`PTH`/`PTer` 不再命中；`Part.1`/`Part1`/`pt2` 仍识别为候选。
+  - `前編/後編` 不加入硬分卷；`3月のライオン.後編` 走普通电影路径。
+  - 新增 `part_movie_number`/`part_title_matches`：Part N 必须有真实非 local TMDB best，且 title/original_title 包含对应 `part N`。
+  - 单文件、目录单元、movie 分组统一使用同一判定；`--match=off`/local best 下 Part N 仍 `unsupported_multipart`。
+  - 硬分卷（CD/Disc/Disk、1of2、上下/前后、Part.A/B、主干末尾 A/B）保持拒绝。
+  - Python 测试从 89 增至 92；真实离线扫描 9 个误报文件名得到 9 个 unit，0 个 `unsupported_multipart`。
+
+## [2026-11-12] - 匹配 warning 透传与 SMB 指引（In Review）
+
+- **修改类型**: Changed
+- **影响范围**: §2.1（新增 G9）；§4.3.6；§4.7.2；`tasks.md`（T12）；`docs/specs/README.md`
+- **变更原因**: 负样本报告指出高置信度误匹配没有任何 warning 可见；SMB 用户在 `E_NO_REPLACE_UNSUPPORTED` 时缺少明确的 `--no-replace=check` 指引。
+- **具体内容**:
+  - scan/plan 必须透传 MediaDetect 的 `warnings[]`，尤其是 `match.year_conflict`、`match.ambiguous_title`，按 `(code, detail, file)` 去重并在人类输出显示。
+  - `E_NO_REPLACE_UNSUPPORTED` message 增加 SMB/NFS 指引：用户确认后可在 apply 与 rollback 同时使用 `--no-replace=check` 或 `MEDIA_TITLE_ALLOW_CHECK_RENAME=1`；不得自动启用。
+  - 不新增平台探测或网络请求。
+  - 状态按 CLAUDE.md 回退为 `In Review`，等待用户批准 T12 后再改生产代码。
+
+## [2026-11-12] - T12/T13 评审修订
+
+- **修改类型**: Changed
+- **影响范围**: §2.1 G9/G10；§4.3.6；§4.7.2；§4.7.4；`tasks.md` T12/T13
+- **变更原因**: 三路评审与 NG 报告确认：A2 是 plan 层把文件级 low 提升为 high；短别名 warning 不够；低分单元仍 planned；SMB check 模式因 mtime 改写全部失败。T12 只做提示/SMB 指引不足以修复。
+- **具体内容**:
+  - G9 扩展为端到端门控：scan 保存 status/margin/score/title_hit；plan 取较低 status，绝不按 score 提升；low/unmatched/score<0.6/title_hit=false → `unplanned/low_confidence`；disabled/unavailable 本地命名例外；medium+title_hit=true 可 planned 但显示 warning。
+  - warning 统一为 `{code,detail,file}` 对象；plan 汇总并 human 输出；本轮只透传 `match.year_conflict`。
+  - `E_NO_REPLACE_UNSUPPORTED` 提示保留；SMB 实际可用性由 G10/T13 修复。
+  - 新增 G10/T13：check-then-rename 先按 size/内容指纹（不含 mtime）校验；utime 恢复 mtime；失败但内容一致 → `size_content` + `mtime_rewritten`，rollback 同策略。
+  - 收缩范围：超集/续集/短别名、B1/B2、u68/R3-u44 等残余风险写入已知限制。
+  - 状态保持 `In Review`，等待用户批准后再实现。
+
+## [2026-11-12] - T12/T13 实现完成
+
+- **修改类型**: Implemented
+- **影响范围**: `skills/media-title/scripts/media_title_lib/{scan,plan,fsops,apply,rollback}.py`、`media_title.py`、tests
+- **变更原因**: 落地端到端置信度门控与 SMB mtime 兼容。
+- **具体内容**:
+  - scan/plan 继承文件级 match status/margin/score/title_hit；low/unmatched/score<0.6/title_hit=false → `unplanned/low_confidence`；disabled/unavailable 例外；medium+title_hit=true 可 planned。
+  - `match.year_conflict` 以 `{code,detail,file}` 进入 scan/plan/human；现有字符串 warning 统一为对象。
+  - `E_NO_REPLACE_UNSUPPORTED` 消息包含 `--no-replace=check`/环境变量提示。
+  - check-then-rename 先按 size/内容指纹（不含 mtime）校验；utime 恢复 mtime；失败 `size_content` + `mtime_rewritten`；rollback 同策略并恢复 from_state mtime。
+  - Python 测试 101 项通过；Go 测试全绿。
+
+## [2026-11-12] - scan 跳过已整理条目（In Review）
+
+- **修改类型**: Changed
+- **影响范围**: §2.1（新增 G8）；§4.2 通用选项；§4.3.5.1；§5.1/§5.2；§6.1；`tasks.md`（T11）；`docs/specs/README.md`
+- **变更原因**: 媒体库根扫描会对所有条目调用 MediaDetect（含 TMDB），名称已带 `{tt...}`/`{tmdb...}` 的已整理条目白跑检测，105 个已整理目录 + 21 个待处理文件耗时超过 8 分钟。
+- **具体内容**:
+  - scan 遍历在进入目录/文件、调用 MediaDetect 前，用共享正则 `\{(?:tt\d+|tmdb\d+)\}`（大小写不敏感）识别已整理条目；命中写 `skipped/already_organized`，不产生 unit/unplanned，不递归子项。
+  - 默认开启；新增 `--include-organized` 强制重新检测，恢复旧行为。目录、文件、输入根本身均适用。
+  - 只看名称，不校验内容或 TMDB ID；其他花括号内容不命中。plan 阶段的已整理判断保留为第二道防线，两处共享正则/辅助函数。
+  - `skipped[]` 只列顶层命中路径，不展开 season/sidecar；扫描仍按原 root 创建 session，媒体文件零改动。
+  - 验收：MediaDetect 调用次数不随已整理目录数量增长；`--include-organized` 后行为与旧版一致；recording FakeRunner 断言 0 次调用。
+  - 状态按 CLAUDE.md 回退为 `In Review`，等待用户批准 T11 后再改生产代码。
+
+## [2026-11-12] - 批准 T11
+
+- **修改类型**: Approved
+- **影响范围**: SPEC-003 spec/tasks 状态；`docs/specs/README.md`
+- **变更原因**: 用户批准 scan 阶段跳过已整理条目。
+- **具体内容**:
+  - SPEC-003 与 `tasks.md` 恢复为 `Approved`；T11 进入实现。
+  - 实现共享已整理正则、scan 提前短路、`--include-organized`、`skipped/already_organized` 与 recording FakeRunner 测试。
+
+## [2026-11-12] - T11 实现完成
+
+- **修改类型**: Implemented
+- **影响范围**: `skills/media-title/scripts/media_title_lib/{paths,plan,scan}.py`、`scripts/media_title.py`、`tests/test_scan.py`
+- **变更原因**: 完成 scan 阶段已整理条目短路，避免无效 MediaDetect/TMDB 调用。
+- **具体内容**:
+  - `paths.py` 新增共享 `ORGANIZED_ID_RE`/`is_organized_name`；plan 的 `_already_organized_movie` 改为复用。
+  - scan 对输入路径本身、库根直接子项、目录与文件统一提前短路；命中写 `skipped/already_organized`，不调用 MediaDetect、不递归、不产生 unit/unplanned。
+  - `--include-organized` 关闭短路并恢复检测；`scan` 选项与 JSON `options` 记录该值。
+  - 过滤 MediaDetect 返回的文件列表，避免已整理子目录内的文件在后续 movie 分组中重新生成 unit。
+  - 人类输出逐条打印 `skipped[]`。
+  - Python 测试从 92 增至 96；真实 CLI：10 个已整理目录 + 1 个待处理文件仅 1 次根检测、0 次 tagged 路径调用、10 条 skipped、1 个 unit。
+
+## [2026-11-14] - 提交前验收修复
+
+- **修改类型**: Fixed
+- **影响范围**: `skills/media-title/scripts/media_title_lib/{scan,paths,fsops}.py`, tests
+- **变更原因**: 提交前独立验收发现 T10/T11/T13 的回归缺口。
+- **具体内容**:
+  - `--mode single` 扫描目录时，已整理文件（含 `--match=off`）不再生成 unit 或 move，写 `skipped/already_organized`；直接文件输入也会识别已整理祖先。
+  - 分卷 A/B 支持 `Movie-A`/`Movie-B` 连字符形式；补 `1-2`/`2-2` 分数式硬分卷，`2020-2021` 不误判。
+  - `E_NO_REPLACE_UNSUPPORTED` 同时提示 `--no-replace=check` 与 `MEDIA_TITLE_ALLOW_CHECK_RENAME=1`。

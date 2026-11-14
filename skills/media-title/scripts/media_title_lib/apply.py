@@ -145,17 +145,32 @@ def validate_plan(plan: Dict[str, Any], expect_plan_id: str) -> None:
         raise ApplyError("E_SCHEMA_UNSUPPORTED", "unsupported plan schema_version")
 
 
-def _same_state(path: str, expected: Optional[Dict[str, Any]]) -> bool:
+def _same_state(path: str, expected: Optional[Dict[str, Any]],
+                portable: bool = False) -> bool:
     if not expected:
         return os.path.exists(path)
     try:
         current = lstat_state(path)
     except OSError:
         return False
-    for key in ("dev", "ino", "size", "mtime_ns"):
+    if portable:
+        keys = ("size", "mtime_ns") if not os.path.isdir(path) else ("mtime_ns",)
+    else:
+        keys = ("dev", "ino", "size", "mtime_ns")
+    for key in keys:
         if key in expected and current.get(key) != expected.get(key):
             return False
     return True
+
+
+def _same_size(path: str, expected: Optional[Dict[str, Any]]) -> bool:
+    if not expected:
+        return os.path.exists(path)
+    try:
+        current = lstat_state(path)
+    except OSError:
+        return False
+    return "size" not in expected or current.get("size") == expected.get("size")
 
 
 def _target_key(path: str) -> str:
@@ -236,14 +251,15 @@ def _check_new_sidecars(unit: Dict[str, Any]) -> None:
                     continue
 
 
-def precheck(plan: Dict[str, Any], selected: List[Dict[str, Any]], retry: bool = False) -> None:
+def precheck(plan: Dict[str, Any], selected: List[Dict[str, Any]],
+             retry: bool = False, allow_check: bool = False) -> Dict[Tuple[int, str], str]:
     root = plan.get("root") or "/"
     if protected_root(root):
         raise ApplyError("E_PROTECTED_ROOT", "refusing protected root: %s" % root)
     targets: Dict[str, str] = {}
     move_targets: Dict[str, str] = {}
     cross_entries: List[Tuple[str, str, str]] = []
-    probes: Dict[Tuple[int, str], bool] = {}
+    probes: Dict[Tuple[int, str], str] = {}
     for unit in selected:
         uid = unit.get("id")
         target = (unit.get("target") or {}).get("path")
@@ -271,12 +287,13 @@ def precheck(plan: Dict[str, Any], selected: List[Dict[str, Any]], retry: bool =
                 except OSError:
                     raise ApplyError("E_SOURCE_MISSING", "source missing: %s" % path)
                 expected = source.get("state") or {}
-                if expected.get("ino") and current.get("ino") != expected.get("ino"):
+                if (not allow_check and expected.get("ino")
+                        and current.get("ino") != expected.get("ino")):
                     raise ApplyError("E_SOURCE_STATE_MISMATCH", "source inode changed: %s" % path)
                 if expected.get("mtime_ns") and current.get("mtime_ns") != expected.get("mtime_ns"):
                     raise ApplyError("E_SOURCE_STATE_MISMATCH", "source directory changed: %s" % path)
             else:
-                if not _same_state(path, source.get("state")):
+                if not _same_state(path, source.get("state"), portable=allow_check):
                     raise ApplyError("E_SOURCE_STATE_MISMATCH", "source changed: %s" % path)
         for op in unit.get("operations") or []:
             if op.get("op") != "move":
@@ -315,10 +332,10 @@ def precheck(plan: Dict[str, Any], selected: List[Dict[str, Any]], retry: bool =
             key = (int(src_dev), kind)
             if key not in probes:
                 try:
-                    fsops.probe_no_replace(parent, kind)
+                    probes[key] = fsops.probe_no_replace(
+                        parent, kind, allow_check=allow_check)
                 except fsops.FsError as exc:
                     raise ApplyError(exc.code, exc.message, exc.exit_code)
-                probes[key] = True
     # mkdir/remove_empty_dir paths may share parents; verify root containment.
     for unit in selected:
         for op in unit.get("operations") or []:
@@ -358,6 +375,7 @@ def precheck(plan: Dict[str, Any], selected: List[Dict[str, Any]], retry: bool =
                 "E_TARGET_IN_SOURCE",
                 "overlapping paths across units: %s (%s) and %s (%s)"
                 % (path_a, role_a, path_b, role_b))
+    return probes
 
 
 def _reconcile_move(record: Dict[str, Any], log_path: str,
@@ -369,31 +387,69 @@ def _reconcile_move(record: Dict[str, Any], log_path: str,
                          "log move path is outside plan root: %s -> %s" % (src, dst))
     from_state = record.get("from_state") or {}
     to_state = record.get("to_state") or {}
+    method = record.get("move_method") or fsops.MOVE_NATIVE
+    portable = method == fsops.MOVE_CHECK
+    # An intent is written before we know whether utime will succeed. SMB may
+    # rewrite mtime during the crash window, so reconciliation must compare
+    # content only, regardless of the validation value guessed in the intent.
+    content_only = portable and (
+        record.get("validation") == "size_content"
+        or record.get("phase") == "intent")
     src_exists = os.path.lexists(src) if src else False
     dst_exists = os.path.lexists(dst) if dst else False
     if src_exists and not dst_exists:
         return None
     if dst_exists and not src_exists:
         current = lstat_state(dst)
-        # rename() and link+unlink both preserve the inode; a different object
-        # at the target means someone replaced it after the move.
-        if from_state.get("dev") is not None and from_state.get("ino") is not None:
+        if portable:
+            if content_only:
+                if os.path.isdir(dst):
+                    expected = record.get("from_content_hash")
+                    current_hash, _ = subtree_fingerprint(
+                        dst, portable=True, include_mtime=False)
+                    if expected and current_hash != expected:
+                        raise ApplyError("E_NON_ATOMIC_MOVE_FAILED",
+                                         "check-then-rename content mismatch: %s" % dst,
+                                         exit_code=4)
+                elif not _same_size(dst, from_state):
+                    raise ApplyError("E_NON_ATOMIC_MOVE_FAILED",
+                                     "check-then-rename size mismatch: %s" % dst,
+                                     exit_code=4)
+            elif not _same_state(dst, from_state, portable=True):
+                raise ApplyError("E_NON_ATOMIC_MOVE_FAILED",
+                                 "check-then-rename target state mismatch: %s" % dst,
+                                 exit_code=4)
+        elif from_state.get("dev") is not None and from_state.get("ino") is not None:
+            # rename() and link+unlink both preserve the inode; a different
+            # object at the target means someone replaced it after the move.
             if (current.get("dev") != from_state.get("dev")
                     or current.get("ino") != from_state.get("ino")):
                 raise ApplyError("E_APPLY_FAILED", "move target identity mismatch: %s" % dst,
                                  exit_code=4)
         elif not _same_state(dst, to_state):
             raise ApplyError("E_APPLY_FAILED", "move target state mismatch: %s" % dst, exit_code=4)
-        extra: Dict[str, Any] = {}
+        extra: Dict[str, Any] = {
+            "move_method": method,
+            "atomic": not portable,
+            "validation": "size_content" if content_only else (
+                record.get("validation") or (
+                    "portable_subtree" if portable and os.path.isdir(dst)
+                    else "size_mtime")),
+        }
         if os.path.isdir(dst):
-            expected_hash = record.get("from_subtree_hash")
-            current_hash, count = subtree_fingerprint(dst)
+            expected_hash = (record.get("from_content_hash") if content_only
+                             else record.get("from_subtree_hash"))
+            current_hash, count = subtree_fingerprint(
+                dst, portable=portable, include_mtime=not content_only)
             if expected_hash:
-                extra = {"to_subtree_hash": expected_hash, "entry_count": record.get("entry_count")}
+                extra.update({"to_subtree_hash": expected_hash,
+                              "entry_count": record.get("entry_count")})
                 if current_hash != expected_hash:
                     extra["subtree_mismatch"] = True
             else:
-                extra = {"to_subtree_hash": current_hash, "entry_count": count}
+                extra.update({"to_subtree_hash": current_hash, "entry_count": count})
+            if content_only and record.get("from_content_hash"):
+                extra["to_content_hash"] = record.get("from_content_hash")
         done = _base_log(plan, record.get("unit"), phase="done", op="move",
                          **{"from": src, "to": dst, "from_state": from_state,
                             "to_state": current, "reconciled": True, **extra})
@@ -410,6 +466,12 @@ def _reconcile_move(record: Dict[str, Any], log_path: str,
             # different paths, so realpath is the right test here.
             raise ApplyError("E_APPLY_FAILED",
                              "move source and target are the same path: %s" % src,
+                             exit_code=4)
+        if portable:
+            # check-then-rename never creates hard links; both endpoints
+            # existing is an unresolvable conflict.
+            raise ApplyError("E_NON_ATOMIC_MOVE_FAILED",
+                             "check-then-rename left both endpoints: %s -> %s" % (src, dst),
                              exit_code=4)
         try:
             same = os.path.samefile(src, dst)
@@ -532,7 +594,11 @@ def apply_plan(
     expect_plan_id: str,
     select: str,
     retry_failed: bool = False,
+    no_replace: str = "strict",
 ) -> Dict[str, Any]:
+    if no_replace not in ("strict", "check"):
+        raise ApplyError("E_USAGE", "--no-replace must be strict or check", exit_code=1)
+    allow_check = no_replace == "check"
     validate_plan(plan, expect_plan_id)
     assert_state_dir(plan.get("root") or "", plan.get("session_id") or "", plan.get("state_dir") or "")
     state_dir = plan.get("state_dir")
@@ -596,11 +662,12 @@ def apply_plan(
             to_run.append(run_unit)
         if not to_run:
             return {"ok": True, "applied": [], "already_applied": already,
-                    "conflicts": conflicts, "plan_id": plan.get("plan_id")}
-        precheck(plan, to_run, retry=retry_failed)
+                    "conflicts": conflicts, "warnings": [], "plan_id": plan.get("plan_id")}
+        capabilities = precheck(plan, to_run, retry=retry_failed, allow_check=allow_check)
         _write_applied_plan(plan)
         log_path = session_files(state_dir)["apply_log"]
         applied = []
+        warnings: List[Dict[str, Any]] = []
         for unit in to_run:
             uid = unit.get("id")
             _set_unit(state, uid, "applying")
@@ -619,30 +686,72 @@ def apply_plan(
                         append_jsonl(log_path, done)
                     elif kind == "move":
                         source = op["from"]
-                        if not _same_state(source, op.get("from_state")):
+                        is_dir = os.path.isdir(source)
+                        try:
+                            source_dev = int(os.lstat(source).st_dev)
+                        except OSError:
+                            raise ApplyError("E_SOURCE_MISSING",
+                                             "source missing before move: %s" % source)
+                        capability = capabilities.get(
+                            (source_dev, "directory" if is_dir else "file"),
+                            fsops.MOVE_NATIVE)
+                        portable = capability == fsops.MOVE_CHECK
+                        validation = (
+                            "portable_subtree" if portable and is_dir
+                            else "size_mtime" if portable else "dev_ino")
+                        if not _same_state(source, op.get("from_state"), portable=portable):
                             raise ApplyError("E_SOURCE_STATE_MISMATCH",
                                              "source changed before move: %s" % source)
                         intent_extra: Dict[str, Any] = {
                             "from": source, "to": op["to"],
                             "from_state": op.get("from_state"), "to_absent": True,
+                            "move_method": capability,
+                            "atomic": not portable,
+                            "validation": validation,
                         }
-                        if os.path.isdir(source):
-                            digest, count = subtree_fingerprint(source)
+                        if is_dir:
+                            digest, count = subtree_fingerprint(source, portable=portable)
                             intent_extra.update({
                                 "from_subtree_hash": digest,
                                 "entry_count": count,
                             })
+                            if portable:
+                                content_hash, _ = subtree_fingerprint(
+                                    source, portable=True, include_mtime=False)
+                                intent_extra["from_content_hash"] = content_hash
                         intent = _base_log(plan, uid, phase="intent", op="move",
                                            **intent_extra)
                         append_jsonl(log_path, intent)
-                        fsops.safe_move(source, op["to"])
+                        move_info = fsops.safe_move(source, op["to"], allow_check=allow_check)
+                        actual_method = move_info["method"]
                         to_state = lstat_state(op["to"])
-                        extra = {}
-                        if os.path.isdir(op["to"]):
-                            extra = {
+                        extra = {
+                            "move_method": actual_method,
+                            "atomic": bool(move_info["atomic"]),
+                            "validation": move_info["validation"],
+                        }
+                        if is_dir:
+                            extra.update({
                                 "to_subtree_hash": intent_extra.get("from_subtree_hash"),
                                 "entry_count": intent_extra.get("entry_count"),
-                            }
+                            })
+                            if intent_extra.get("from_content_hash"):
+                                extra["to_content_hash"] = intent_extra["from_content_hash"]
+                        if actual_method == fsops.MOVE_CHECK:
+                            warnings.append({
+                                "code": "non_atomic_move",
+                                "path": op["to"],
+                                "method": fsops.MOVE_CHECK,
+                                "atomic": False,
+                                "validation": move_info["validation"],
+                            })
+                            if move_info["validation"] == "size_content":
+                                warnings.append({
+                                    "code": "mtime_rewritten",
+                                    "path": op["to"],
+                                    "method": fsops.MOVE_CHECK,
+                                    "atomic": False,
+                                })
                         done = _base_log(plan, uid, phase="done", op="move",
                                          **{"from": source, "to": op["to"],
                                             "from_state": op.get("from_state"),
@@ -670,4 +779,5 @@ def apply_plan(
                     raise ApplyError(exc.code, exc.message, exc.exit_code)
                 raise ApplyError("E_APPLY_FAILED", str(exc), exit_code=4)
         return {"ok": True, "applied": applied, "already_applied": already,
-                "conflicts": conflicts, "plan_id": plan.get("plan_id")}
+                "conflicts": conflicts, "warnings": warnings,
+                "plan_id": plan.get("plan_id")}

@@ -4,7 +4,7 @@ MediaDetect 是一个无状态、只读的媒体类型检测库与 CLI。输入�
 
 它不创建索引、不写 SQLite、不写缓存或临时文件，也不会修改输入目录中的任何文件。
 
-- 当前版本：`0.2.1`
+- 当前版本：`0.2.2`
 - JSON Schema 版本：`"1"`
 - 最低 Go 版本：`1.27.1`
 - License：[MIT](LICENSE)
@@ -12,7 +12,7 @@ MediaDetect 是一个无状态、只读的媒体类型检测库与 CLI。输入�
 ## 安装
 
 ```bash
-go install github.com/dream-365/MediaDetect/cmd/mediadetect@v0.2.1
+go install github.com/dream-365/MediaDetect/cmd/mediadetect@v0.2.2
 ```
 
 `go install` 会把二进制装到 `$(go env GOPATH)/bin/mediadetect`，不需要手写模块代理转义。
@@ -284,6 +284,12 @@ python3 skills/media-title/scripts/media_title.py rollback \
 
 技能本身只依赖 Python 3.9+ 标准库；MediaDetect 通过 `--md-bin` 或 `MD_BIN` 指定。详细工作流见 `skills/media-title/SKILL.md`，命名规则见 `skills/media-title/references/naming.md`。
 
+`scan` 默认跳过名称已含 `{tt...}`/`{tmdb...}` 的已整理目录和文件，写入 `skipped/already_organized`，不调用 MediaDetect。需要强制重扫这些条目时加 `--include-organized`。
+
+TMDB 匹配为 low/unmatched、score 低于 0.6 或 `title_hit=false` 的单元默认进入 `unplanned/low_confidence`，不会生成可执行计划；`--match=off` 等本地降级命名不受影响。`medium` 且 `title_hit=true` 可进入计划，但会带 `medium_confidence` warning，提示执行前核对。
+
+SMB/NFS 文件系统可能既不支持原子 no-replace，也不支持硬链接。默认 `strict` 模式会以 `E_NO_REPLACE_UNSUPPORTED` 拒绝执行，媒体文件零改动。只有用户明确接受非原子移动的竞态风险时，才可以在 `apply` 和 `rollback` 上同时加 `--no-replace=check`（或设置 `MEDIA_TITLE_ALLOW_CHECK_RENAME=1`）；该模式会校验 size/内容指纹，结果输出 `non_atomic_move` 警告，日志记录 `move_method`/`atomic`/`validation`。
+
 ## 无状态与只读
 
 - 不写输入目录，不创建索引、SQLite、缓存或临时文件。
@@ -310,6 +316,7 @@ python3 skills/media-title/scripts/media_title.py rollback \
 - `Show S01`、`Show.Season.1` 这类目录名当前按 `tv_series` 处理；只识别 `S01`、`Season 1`、`第 N 季`。
 - 无季集上下文的 `NxM` 数字 token 仍可能有歧义。
 - 中英文双命名且未匹配成功时，`distinct_movies` 可能多算。
+- 自 v0.2.2 起，文件名年份与 TMDB 年份相差超过 5 年且 runtime 证据不成立时，`confidence` 最高 `low`，并输出 `match.year_conflict`；runtime 证据成立时保留原 confidence，但仍输出 warning。
 - 导演剪辑版/重映条目的年份差异、正确 best 但 margin 过低的候选，按既有 matcher 规则处理，详见 [SPEC-001 附录 B](docs/specs/SPEC-001-media-type-detection/spec.md#附录-b已知限制)。
 - TMDB 剧集匹配尚未实现；剧集只做本地识别。
 

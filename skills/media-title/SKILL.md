@@ -2,7 +2,7 @@
 name: media-title
 description: Organize local movie and TV directories with MediaDetect. Use when the user asks to rename, sort, or clean up downloaded movies or shows, or to apply a consistent library naming scheme.
 metadata:
-  version: 0.1.0
+  version: 0.1.1
 ---
 
 # media-title
@@ -19,6 +19,21 @@ orchestration layer.
 - Never use `mv`, `cp`, or `mkdir` yourself. Only call the helper script.
 - Do not organize a path the user did not ask for.
 - If anything is ambiguous, keep it `unplanned` and say why. Do not guess.
+- Low/unmatched TMDB matches, `score < 0.6`, or `title_hit=false` are
+  `unplanned/low_confidence`; do not try to force them into a plan. Local
+  naming may still be used when TMDB is disabled/unavailable.
+- A `medium` match with `title_hit=true` may be planned, but it carries a
+  `medium_confidence` warning. Show that warning and ask the user to review.
+- Moves are atomic no-replace by default. On SMB/NFS filesystems that support
+  neither atomic no-replace nor hard links, the script refuses with
+  `E_NO_REPLACE_UNSUPPORTED`. Do **not** enable the fallback on your own.
+  Only if the user explicitly accepts the risk, pass
+  `--no-replace=check` (or set `MEDIA_TITLE_ALLOW_CHECK_RENAME=1`) to `apply`
+  and to the corresponding `rollback`. This uses a non-atomic
+  check-then-rename: a target created by another process in the tiny window
+  between the existence check and rename could be overwritten. The result
+  must show `non_atomic_move`, and the logs record `move_method`/`atomic`/
+  `validation`; report that warning to the user.
 
 ## Workflow
 
@@ -30,6 +45,11 @@ python3 scripts/media_title.py scan "<path>" --json
 
 Read `session_id`, `root`, `units[]`, `unplanned[]`, and `skipped[]`.
 If `unplanned` is non-empty, show every item and its `reason_code`.
+
+By default, entries whose names contain `{tt...}`/`{tmdb...}` are not
+detected: they are listed in `skipped[]` with `already_organized`, and their
+children are not traversed. Only use `--include-organized` when the user
+explicitly wants to force re-detection of those entries.
 
 ### 2. Plan
 
@@ -77,6 +97,10 @@ python3 scripts/media_title.py apply \
 `--select` accepts `all` or unit IDs, never row numbers. The plan hash and the
 session token must match; mismatches abort.
 
+If the user explicitly chose the SMB/NFS fallback, append
+`--no-replace=check` to both apply and rollback. Otherwise omit it: the default
+`strict` mode refuses unsupported filesystems rather than taking the race.
+
 ### 5. Report and rollback
 
 Report executed units, skipped units, conflicts, and the session directory.
@@ -92,7 +116,9 @@ python3 scripts/media_title.py rollback \
 
 If the plan file was replaced or deleted, use `--session-dir <state_dir>`.
 Rollback validates fingerprints before moving anything; a conflict means the
-user or another process changed the target.
+user or another process changed the target. If apply used
+`--no-replace=check`, rollback must use the same flag or it returns
+`E_NO_REPLACE_UNSUPPORTED` before changing anything.
 
 ## Rules the script enforces
 
@@ -101,7 +127,9 @@ user or another process changed the target.
 - `--expect-plan-id` and `--yes` are required for rollback.
 - No overwrite, no directory merge, no deletion of non-empty directories.
 - Only `mkdir`, `move`, and `remove_empty_dir` operations exist.
-- A move uses no-replace semantics; unsupported filesystems are rejected.
+- A move uses atomic no-replace semantics by default; unsupported filesystems
+  are rejected. `--no-replace=check` is an explicit, non-atomic fallback for
+  SMB/NFS and must never be enabled without user consent.
 - Intent/done logs make crash recovery and rollback possible.
 
 ## When to stop

@@ -8,10 +8,11 @@ import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import naming
+from . import __version__, naming
 from .paths import (
     SIDECAR_EXTS,
     is_generic_container,
+    is_organized_name,
     lstat_state,
     nfc,
     same_path,
@@ -133,8 +134,7 @@ def _episode_filename(
 
 
 def _already_organized_movie(path: str) -> bool:
-    name = os.path.basename(path.rstrip(os.sep))
-    return bool(re.search(r"\{(?:tt\d+|tmdb\d+)\}", name, re.IGNORECASE))
+    return is_organized_name(os.path.basename(path.rstrip(os.sep)))
 
 
 def _normalized_component(name: str) -> str:
@@ -181,22 +181,93 @@ def _sibling_snapshot(sources: List[Dict[str, Any]]) -> Dict[str, List[str]]:
     return snapshot
 
 
-def _movie_match_status(best: Dict[str, Any]) -> str:
-    if best.get("local"):
-        return "low"
+_STATUS_RANK = {"unmatched": 0, "low": 1, "medium": 2, "high": 3}
+
+
+def _score_status(score: Any) -> str:
     try:
-        score = float(best.get("score") or 0)
+        value = float(score or 0)
     except (TypeError, ValueError):
-        score = 0.0
-    if score >= 0.8:
+        value = 0.0
+    if value >= 0.8:
         return "high"
-    if score >= 0.5:
+    if value >= 0.5:
         return "medium"
     return "low"
 
 
+def _final_movie_status(unit: Dict[str, Any], best: Dict[str, Any]) -> str:
+    file_status = str(unit.get("match_status") or "")
+    if file_status in ("disabled", "unavailable"):
+        return file_status
+    if file_status not in _STATUS_RANK:
+        file_status = _score_status(unit.get("match_score", best.get("score", 0)))
+    score_status = _score_status(unit.get("match_score", best.get("score", 0)))
+    if _STATUS_RANK[score_status] < _STATUS_RANK[file_status]:
+        return score_status
+    return file_status
+
+
+def _warning_key(warning: Any) -> Tuple[Any, Any, Any]:
+    if isinstance(warning, dict):
+        return (warning.get("code"), warning.get("detail"), warning.get("file"))
+    return (str(warning), "", None)
+
+
+def _warning_obj(warning: Any) -> Dict[str, Any]:
+    if isinstance(warning, dict):
+        return warning
+    return {"code": str(warning), "detail": "", "file": None}
+
+
+def _unit_warning_file(unit: Dict[str, Any]) -> Optional[str]:
+    files = unit.get("files") or []
+    raw = next((f.get("raw_path") for f in files if f.get("raw_path")), None)
+    if not raw:
+        return None
+    root = unit.get("root")
+    if root:
+        try:
+            rel = os.path.relpath(raw, root)
+            if not rel.startswith(".."):
+                return rel
+        except ValueError:
+            pass
+    return os.path.basename(raw)
+
+
+def _low_confidence(unit: Dict[str, Any], best: Dict[str, Any]) -> bool:
+    status = _final_movie_status(unit, best)
+    if status in ("disabled", "unavailable"):
+        return False
+    if status in ("low", "unmatched"):
+        return True
+    if not bool(unit.get("title_hit", True)):
+        return True
+    try:
+        score = float(unit.get("match_score", best.get("score", 0)) or 0)
+    except (TypeError, ValueError):
+        score = 0.0
+    return score < 0.6
+
+
 def _movie_unit(unit: Dict[str, Any], options: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
     best = unit.get("best") or {}
+    if _low_confidence(unit, best):
+        return None, [{
+            "path": unit.get("source_root") or ",".join(unit.get("source_paths", [])),
+            "kind": "movie", "reason_code": "low_confidence",
+            "reason": "low or unproven TMDB match; review manually",
+        }]
+    status = _final_movie_status(unit, best)
+    warnings_out = list(unit.get("warnings") or [])
+    if status == "medium":
+        if not any(_warning_key(w)[0] == "medium_confidence" for w in warnings_out):
+            warnings_out.append({
+                "code": "medium_confidence",
+                "detail": "medium confidence; review before applying",
+                "file": _unit_warning_file(unit),
+            })
     try:
         target_name = naming.movie_target(best)
     except naming.NamingError as exc:
@@ -253,13 +324,13 @@ def _movie_unit(unit: Dict[str, Any], options: Dict[str, Any]) -> Tuple[Optional
         "kind": "movie",
         "status": "planned",
         "confidence": (unit.get("best") or {}).get("score", 0),
-        "match_status": _movie_match_status(best),
+        "match_status": status,
         "sources": sources,
         "source_hash": _source_hash(sources),
         "sibling_snapshot": _sibling_snapshot(sources),
         "target": target,
         "operations": operations,
-        "warnings": list(unit.get("warnings") or []),
+        "warnings": warnings_out,
         "evidence": {k: best.get(k) for k in (
             "tmdb_id", "imdb_id", "score", "year", "title", "original_title"
         ) if k in best},
@@ -455,6 +526,18 @@ def build_plan(scan: Dict[str, Any], options: Optional[Dict[str, Any]] = None) -
             })
         units_out = kept
 
+    # Warnings attached to units (including match diagnostics and the
+    # medium-confidence review hint) must also be visible at plan level.
+    seen_warning_keys = {_warning_key(warning) for warning in warnings}
+    for unit in units_out:
+        for warning in unit.get("warnings") or []:
+            item = _warning_obj(warning)
+            key = _warning_key(item)
+            if key in seen_warning_keys:
+                continue
+            warnings.append(item)
+            seen_warning_keys.add(key)
+
     for index, unit in enumerate(units_out, start=1):
         unit["id"] = "u%d" % index
 
@@ -464,7 +547,7 @@ def build_plan(scan: Dict[str, Any], options: Optional[Dict[str, Any]] = None) -
         "session_token": scan.get("session_token"),
         "state_dir": scan.get("state_dir"),
         "generated_at": utc_now(),
-        "tool_version": "0.1.0",
+        "tool_version": __version__,
         "root": scan.get("root"),
         "mode": scan.get("mode"),
         "options": {

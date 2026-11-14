@@ -15,7 +15,7 @@ func (w *warningSet) add(code, detail string, file *string) {
 	if file != nil {
 		fileValue = *file
 	}
-	key := code + "\x00" + fileValue
+	key := code + "\x00" + detail + "\x00" + fileValue
 	if _, exists := w.items[key]; exists {
 		return
 	}
@@ -43,7 +43,10 @@ func (w *warningSet) list() []Warning {
 		if out[j].File != nil {
 			right = *out[j].File
 		}
-		return left < right
+		if left != right {
+			return left < right
+		}
+		return out[i].Detail < out[j].Detail
 	})
 	return out
 }

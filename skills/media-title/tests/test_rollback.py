@@ -25,7 +25,7 @@ def build_plan(root):
         "session_token": session["session_token"],
         "state_dir": session["state_dir"],
         "generated_at": "2026-01-01T00:00:00Z",
-        "tool_version": "0.1.0",
+        "tool_version": "0.1.1",
         "root": root,
         "mode": "file",
         "options": {},

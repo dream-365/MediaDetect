@@ -52,6 +52,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
         probe=args.probe,
         max_files=args.max_files,
         session_id=args.session,
+        include_organized=args.include_organized,
     )
     files = session_files(scan["state_dir"])
     _write(files["scan"], scan)
@@ -87,13 +88,22 @@ def cmd_plan(args: argparse.Namespace) -> int:
     return 0
 
 
+def _no_replace_mode(args: argparse.Namespace) -> str:
+    if getattr(args, "no_replace", None):
+        return args.no_replace
+    if os.environ.get("MEDIA_TITLE_ALLOW_CHECK_RENAME") == "1":
+        return "check"
+    return "strict"
+
+
 def cmd_apply(args: argparse.Namespace) -> int:
     if not args.yes:
         raise ApplyError("E_USAGE", "--yes is required", exit_code=1)
     if not args.select:
         raise ApplyError("E_USAGE", "--select is required", exit_code=1)
     plan = _read(args.plan)
-    result = apply_plan(plan, args.expect_plan_id, args.select, args.retry_failed)
+    result = apply_plan(plan, args.expect_plan_id, args.select, args.retry_failed,
+                        no_replace=_no_replace_mode(args))
     if args.json:
         _json_out(result)
     else:
@@ -141,7 +151,8 @@ def cmd_rollback(args: argparse.Namespace) -> int:
     if not args.yes:
         raise RollbackError("E_USAGE", "--yes is required", exit_code=1)
     plan = _load_rollback_plan(args)
-    result = rollback_plan(plan, args.expect_plan_id, args.select)
+    result = rollback_plan(plan, args.expect_plan_id, args.select,
+                           no_replace=_no_replace_mode(args))
     if args.json:
         _json_out(result)
     else:
@@ -161,6 +172,18 @@ def _human_scan(scan: Dict[str, Any]) -> None:
                                 unit.get("source_root") or ",".join(unit.get("source_paths") or [])))
     for item in scan.get("unplanned") or []:
         print("  unplanned %s  %s  %s" % (item.get("reason_code"), item.get("path"), item.get("reason")))
+    for item in scan.get("skipped") or []:
+        print("  skipped %s  %s  %s" % (item.get("reason_code"), item.get("path"), item.get("reason")))
+    _human_warnings(scan.get("warnings") or [])
+
+
+def _human_warnings(warnings: Any) -> None:
+    for item in warnings or []:
+        if isinstance(item, dict):
+            print("  warning %s  %s  %s" % (
+                item.get("code"), item.get("file") or "", item.get("detail") or ""))
+        else:
+            print("  warning %s" % item)
 
 
 def _human_plan(plan: Dict[str, Any]) -> None:
@@ -173,16 +196,26 @@ def _human_plan(plan: Dict[str, Any]) -> None:
         ))
     for item in plan.get("unplanned") or []:
         print("  unplanned %s  %s  %s" % (item.get("reason_code"), item.get("path"), item.get("reason")))
+    _human_warnings(plan.get("warnings") or [])
+
+
+def _print_warnings(result: Dict[str, Any]) -> None:
+    for warning in result.get("warnings") or []:
+        print("warning: %s  %s  method=%s  atomic=%s" % (
+            warning.get("code"), warning.get("path"), warning.get("method"),
+            warning.get("atomic")))
 
 
 def _human_apply(result: Dict[str, Any]) -> None:
-    print("applied: %s" % ", ".join(result.get("applied") or []) or "-")
+    print("applied: %s" % (", ".join(result.get("applied") or []) or "-"))
     if result.get("already_applied"):
         print("already applied: %s" % ", ".join(result["already_applied"]))
+    _print_warnings(result)
 
 
 def _human_rollback(result: Dict[str, Any]) -> None:
     print("rolled back: %s" % (", ".join(result.get("rolled_back") or []) or "-"))
+    _print_warnings(result)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -200,6 +233,8 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--match", choices=["auto", "on", "off"], default="auto")
     scan.add_argument("--probe", choices=["off", "auto"], default="off")
     scan.add_argument("--max-files", type=int, default=5000)
+    scan.add_argument("--include-organized", action="store_true",
+                      help="re-detect entries whose names contain {tt...}/{tmdb...}")
     scan.set_defaults(func=cmd_scan)
 
     plan = sub.add_parser("plan")
@@ -217,6 +252,8 @@ def build_parser() -> argparse.ArgumentParser:
     apply.add_argument("--select", required=True)
     apply.add_argument("--yes", action="store_true")
     apply.add_argument("--retry-failed", action="store_true")
+    apply.add_argument("--no-replace", choices=["strict", "check"], default=None,
+                       help="strict: atomic no-replace only; check: opt-in non-atomic fallback")
     apply.set_defaults(func=cmd_apply)
 
     rollback = sub.add_parser("rollback")
@@ -226,6 +263,8 @@ def build_parser() -> argparse.ArgumentParser:
     rollback.add_argument("--expect-plan-id", required=True)
     rollback.add_argument("--select")
     rollback.add_argument("--yes", action="store_true")
+    rollback.add_argument("--no-replace", choices=["strict", "check"], default=None,
+                          help="must be check when apply logs used check-then-rename")
     rollback.set_defaults(func=cmd_rollback)
     return parser
 

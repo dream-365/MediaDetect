@@ -1,0 +1,61 @@
+{
+  "schema_version": "1",
+  "session_id": "20260101T000000Z-abcdef12",
+  "session_token": "0123456789abcdef0123456789abcdef",
+  "state_dir": "/tmp/media-title-fixture/.media-title/sessions/20260101T000000Z-abcdef12",
+  "generated_at": "2026-01-01T00:00:00Z",
+  "tool_version": "0.1.1",
+  "input": {"path": "/tmp/media-title-fixture", "kind": "directory"},
+  "root": "/tmp/media-title-fixture",
+  "mode": "library",
+  "mode_reason": "library",
+  "options": {
+    "match_mode": "auto",
+    "probe_mode": "off",
+    "max_files": 5000,
+    "include_organized": false
+  },
+  "md_version": {"name": "mediadetect", "schema_version": "1", "version": "0.2.2"},
+  "units": [
+    {
+      "kind": "movie",
+      "input_kind": "files",
+      "source_paths": ["/tmp/media-title-fixture/Give.Me.Five.2022.1080p.mkv"],
+      "root": "/tmp/media-title-fixture",
+      "files": [],
+      "best": {
+        "source": "tmdb",
+        "tmdb_id": 1,
+        "imdb_id": "tt0000001",
+        "title": "Give Me Five",
+        "original_title": "Give Me Five",
+        "year": 1984,
+        "score": 0.76,
+        "title_hit": true,
+        "runtime_delta_sec": null
+      },
+      "context": {"mode": "files", "target_hint": "Give Me Five (1984)"},
+      "warnings": [
+        {
+          "code": "match.year_conflict",
+          "detail": "year_delta=-38 file_year=2022 tmdb_year=1984 runtime_ok=false",
+          "file": "Give.Me.Five.2022.1080p.mkv"
+        }
+      ],
+      "match_status": "low",
+      "match_margin": 0.12,
+      "match_score": 0.76,
+      "title_hit": true
+    }
+  ],
+  "unplanned": [],
+  "skipped": [],
+  "errors": [],
+  "warnings": [
+    {
+      "code": "match.year_conflict",
+      "detail": "year_delta=-38 file_year=2022 tmdb_year=1984 runtime_ok=false",
+      "file": "Give.Me.Five.2022.1080p.mkv"
+    }
+  ]
+}

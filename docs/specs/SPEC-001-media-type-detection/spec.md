@@ -3,7 +3,7 @@ type: spec
 status: Approved
 owner: alang
 depends_on: []
-updated_at: 2026-11-12
+updated_at: 2026-11-14
 ---
 
 # MediaDetect 媒体检测库与 CLI 技术方案
@@ -54,7 +54,7 @@ MediaDetect 把这些能力收敛为一个独立 Go module 和一个无状态 CL
 * **G1 - 无状态 CLI 契约（架构/接口）**：`mediadetect <path>` 和 `mediadetect -` 每次只输出一个 JSON 对象；不创建索引目录、不写 SQLite、不写缓存或临时文件；成功、降级、未匹配和错误都有稳定字段与退出码。验收方式：CLI golden 测试覆盖文件、目录、stdin、缺少参数、路径不存在、无 TMDB key、`--match=off` 七种场景；运行前后对输入树做内容/mtime/inode 快照，断言零写入。
 * **G2 - 独立 detect 模块（架构/代码）**：公开仓库与 Go module `github.com/dream-365/MediaDetect`（仓库名 `MediaDetect`，MIT License）拥有自己的 `go.mod`，包含 `parser`、`probe`、`tmdb`、`matcher`、`internal/llm`、`internal/collect`、根包 `mediadetect` 和 `cmd/mediadetect`；模块不依赖任何私有项目；module path 大小写必须与仓库路径一致。包位置以 SPEC-002 §4.1 为准；G2 的其他验收不变。验收方式：`go test ./...` 通过；`go list -deps ./cmd/mediadetect` 不包含私有依赖；`go mod tidy -diff` 无差异；干净缓存下 `GOWORK=off go mod download github.com/dream-365/MediaDetect@vX.Y.Z` 成功（代理路径转义为 `github.com/dream-365/!media!detect`）；`go install github.com/dream-365/MediaDetect/cmd/mediadetect@vX.Y.Z` 可用。
 * **G3 - 本地媒体类型识别（质量/指标）**：在运行前冻结的人工标注样本（≥100 个真实文件/目录）上，`movie`、`tv_episode`、`tv_season`、`tv_series`、`non_feature`、`auxiliary`、`other` 的总体准确率 ≥95%（不含附录 B 的已知限制桶），并分别报告每类 precision/recall；含已知限制桶的准确率也必须写入报告，但不作为门槛。映射契约测试：4.5.1 每条映射规则有单元测试；parser 已识别的显式剧集标记（`SxxExx`、中文“第 N 集”）在 type 映射上召回率 100%——这是契约测试，不作为真实世界准确率指标。4.5.1.1 的 parser 修正必须覆盖辅助类型优先、`sample`/`oad` 词边界、`ova` 误报、`1x01`/`S01.E01` 和全角斜杠/分数标题；连续多集 `S01E01E02`/`S01E01E02E03` 按 SPEC-003 G6 修复；未修正的裸数字集号、非连续 `S01E01E03` 等列入附录 B。验收方式：`docs/quality/SPEC-001/calibration-report.md` 给出冻结样本清单、混淆矩阵、逐类样本数、已知限制清单和错误清单；同时用 ≥60 条基于 parser 测试语料和目录 fixture 的回归测试。
-* **G4 - 匹配与 IMDb ID（质量/指标）**：在冻结的 225 个 feature 文件基线上（文件级分母），high 置信匹配率 ≥86.2%（基线 194/225），high+medium 合计 ≥90%（基线 207/225 = 92.0%）；组级口径（221 部）单独报告 high ≥86.9%、high+medium ≥94.6%，不得与文件级数字混用。对 high 置信匹配，`imdb_id` 非空率 ≥95%；剧集文件不得被发送到 TMDB 电影搜索。验收方式：固定样本 + mock TMDB 服务（`--tmdb-base-url` 或库级 `TMDBOptions.BaseURL`）；统计 high/medium 占比、`imdb_id` 缺失清单和搜索请求的媒体类型断言；与历史基线结果做对照并给出允许差异；真实样本报告归档。不得通过人工映射或新增匹配规则达到阈值；95% 及以上属于后续匹配校准 spec 的目标。
+* **G4 - 匹配与 IMDb ID（质量/指标）**：在冻结的 225 个 feature 文件基线上（文件级分母），high 置信匹配率 ≥86.2%（基线 194/225），high+medium 合计 ≥90%（基线 207/225 = 92.0%）；组级口径（221 部）单独报告 high ≥86.9%、high+medium ≥94.6%，不得与文件级数字混用。对 high 置信匹配，`imdb_id` 非空率 ≥95%；剧集文件不得被发送到 TMDB 电影搜索。验收方式：固定样本 + mock TMDB 服务（`--tmdb-base-url` 或库级 `TMDBOptions.BaseURL`）；统计 high/medium 占比、`imdb_id` 缺失清单和搜索请求的媒体类型断言；与历史基线结果做对照并给出允许差异；真实样本报告归档。不得通过人工映射或新增匹配规则达到阈值；95% 及以上属于后续匹配校准 spec 的目标。SPEC-004 的硬年份冲突封顶属于安全收紧，不作为提高匹配率的新规则；它允许把 `|delta|>5` 且无 runtime 证据的候选降为 `low`。
 * **G5 - 降级与隐私（可靠性/安全）**：对电影文件，`--match=auto` 且无 `TMDB_API_KEY` 时，本地检测仍返回 `ok=true`、`match.status=disabled`，退出 0；`--match=off` 时零 HTTP 请求（库级测试注入计数 `http.RoundTripper`，CLI 测试用 `--tmdb-base-url` 指向 mock 服务器）；`--match=on` 且缺少 key 或 TMDB 不可达时，本地结果仍输出，电影文件的 `match.status=error`，退出 4；纯剧集/附属输入不因缺少 TMDB key 失败，类型为 `not_applicable`。JSON、stderr 和错误信息中不出现 API key、Authorization、原始 URL query 或响应 body。验收方式：无 key 测试、mock 网络失败测试、key/query 脱敏测试、零请求 transport 计数测试。
 
 ### 2.2 非目标
@@ -758,6 +758,7 @@ flags 可以出现在路径之前或之后；`--` 结束 flag 解析。`--versio
 * `--version` 输出 `{"name":"mediadetect","display_name":"MediaDetect","version":"0.1.0","schema_version":"1"}`。
 * 发布坐标：仓库 `github.com/dream-365/MediaDetect`，Go module path 与仓库路径一致（含大写），首个 tag `v0.1.0`；License 为 MIT。Go 模块代理只转义大写字母，`MediaDetect` 的转义结果是 `!media!detect`（完整路径 `github.com/dream-365/!media!detect`），属正常行为；用户执行 `go get`/`go install` 时不需要手写转义。
 * 版本策略：module tag 与 JSON `schema_version` 独立；v0.x 的 minor 可包含破坏性 Go API，patch 不破坏；`--version.version` 必须由 `-ldflags -X main.version=...` 或 `debug.ReadBuildInfo` 注入，发布检查断言 tag 与输出一致；已推送的 tag 不移动、不删除。
+* **v0.2.2 patch**：SPEC-004 的硬年份冲突封顶只收紧 matcher 的 `confidence` 并新增 `match.year_conflict` warning，不改变 Go API、JSON schema 或字段含义。该行为变更由 SPEC-004 授权；除硬年份规则外，v0.2.2 的构建、包边界和检测基线不变。
 
 ### 4.5 核心流程与时序
 
@@ -877,6 +878,7 @@ mediadetect 不新增分类规则，只把 parser 的已有输出映射为对外
    * `margin` = `Result.Margin`；无候选时为 `null`。
    * `candidates` = 去掉 `best` 后按得分降序的前 `--candidates` 个 `Scored`；无备选时为空数组；`candidates[].imdb_id` 为 `null`。
    * `best` = 第一个候选；如果 `best.Movie.IMDbID` 为空，调用 `tmdb.Client.Details(ctx, best.Movie.ID)` 补齐；失败时 `imdb_id=null`，追加 `match.imdb_id_unavailable` 警告，不影响 `status`。
+   * **硬年份冲突封顶（v0.2.2）**：若 `best` 有年份且文件名存在 primary year，`|tmdb_year - file_year| > 5` 时，若 runtime 证据成立（`|runtime_delta| <= 180s`）保留原 `confidence`，否则 `confidence` 最高 `low`；两种情况都追加 `match.year_conflict` warning。`|delta| <= 5` 或任一年份缺失时不封顶。clamp 只降不升。
 4. 匹配后按 `best.Movie.ID` 对电影组做 union：同一 TMDB 条目的不同 `GroupKey`（例如中英文命名、不同版本）合并为一组；代表文件取组内得分最高者；把该组的 `Match` 复制给 union 后组内所有文件，文件级 `match.file` 设为该文件自己的路径。`distinct_movies` = union 后的匹配组数 + 未匹配的非空 `GroupKey` 组数 + 空 `GroupKey` 文件数。
 5. 匹配失败（`Match` 返回 error）时：
    * context 已取消：返回 `ERR_CANCELED`，优先于 `auto`/`on` 的降级。
@@ -1143,6 +1145,7 @@ MediaDetect 是无状态库与 CLI，没有服务流量；按以下阶梯发布�
 | `GroupKey` 为空 | 用文件路径生成唯一组键 | `group_key`、`distinct_movies` | 已定义；`group_key=null` |
 | TMDB 无条目/标题损坏 | `unmatched` 或 `low` | G4、`imdb_id` | 不新增数据源；报告未匹配清单 |
 | 导演剪辑版/重映条目年份差异 | 别名标题 + runtime 命中时可覆盖年份差异并判 `high` | G4 置信度语义 | 保留既有 matcher 行为；校准报告记录匿名样例 |
+| 文件名年份与 TMDB 年份硬冲突且无 runtime | `|delta|>5` 时 `confidence` 最高 `low`，并输出 `match.year_conflict`；runtime 成立保留原 `confidence` + warning | G4 置信度语义 | v0.2.2 起；A1 类样本由 SPEC-004 校准报告跟踪 |
 | 正确 best 但第二名接近 | `margin < 0.10` 时降为 `low` | G4 置信度语义 | 保留既有 matcher 行为；校准报告记录匿名样例（如 `Example.Film.2007`） |
 | 剧集元数据 | 只做本地识别，`not_applicable` | `match`、`imdb_id` | Deferred to Phase 2；不返回剧集 IMDb ID |
 | 全量 IMDb 字段 | 只返回 TMDB 条目字段 + `imdb_id` | `imdb_id` 以外的 IMDb 数据 | Deferred to Phase 2；另立数据集 spec |

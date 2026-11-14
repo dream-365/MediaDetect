@@ -53,7 +53,7 @@ func TestCLIVersionAndHelp(t *testing.T) {
 		t.Fatalf("exit = %d", exit)
 	}
 	obj := decodeSingle(t, out)
-	if obj["name"] != "mediadetect" || obj["schema_version"] != "1" || obj["version"] != "0.2.1" {
+	if obj["name"] != "mediadetect" || obj["schema_version"] != "1" || obj["version"] != "0.2.2" {
 		t.Fatalf("version = %v", obj)
 	}
 
@@ -65,11 +65,11 @@ func TestCLIVersionAndHelp(t *testing.T) {
 
 func TestNormalizeBuildVersion(t *testing.T) {
 	cases := map[string]string{
-		"v0.2.1":                            "0.2.1",
-		"0.2.1":                             "0.2.1",
+		"v0.2.2":                            "0.2.2",
+		"0.2.2":                             "0.2.2",
 		"(devel)":                           defaultVersion,
 		"0.0.0-20261112063404-8f87066b4abc": defaultVersion,
-		"v0.2.1+dirty":                      defaultVersion,
+		"v0.2.2+dirty":                      defaultVersion,
 	}
 	for input, want := range cases {
 		if got := normalizeBuildVersion(input); got != want {
