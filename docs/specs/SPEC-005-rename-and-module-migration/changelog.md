@@ -63,4 +63,4 @@ updated_at: 2026-11-14
 - **修改类型**: Changed
 - **影响范围**: frontmatter 状态、tasks 状态、发布验证记录
 - **变更原因**: 维护者批准实测修正；实现与发布已完成
-- **具体内容**: Spec 状态改为 `Implemented`，tasks 改为 `Done`；记录 v0.3.0 Release 资产远端大小与本地完全一致；`media-title-skill_v0.3.0.tar.gz` 已下载并通过 checksums 校验；4 个二进制因本机到 `release-assets.githubusercontent.com` 的 TLS 超时未能完整下载，校验需在正常网络环境复核
+- **具体内容**: Spec 状态改为 `Implemented`，tasks 改为 `Done`；记录 v0.3.0 Release 资产远端大小与本地完全一致；通过本地代理下载全部 5 个资产并执行 `shasum -a 256 -c checksums.txt`，全部 OK；补测 `proxy.golang.org`：旧路径 `@latest` 选中 v0.3.0 并报路径不一致，与 `GOPROXY=direct` 一致，只有 goproxy.cn 仍解析到 v0.2.2
