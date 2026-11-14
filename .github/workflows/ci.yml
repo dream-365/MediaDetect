@@ -101,7 +101,7 @@ jobs:
           version=$("$RUNNER_TEMP/mediadetect" --version)
           printf '%s\n' "$version"
           case "$version" in
-            *'"version":"0.2.2"'*) ;;
+            *'"version":"0.3.0"'*) ;;
             *) echo "unexpected version output"; exit 1 ;;
           esac
       - name: py_compile

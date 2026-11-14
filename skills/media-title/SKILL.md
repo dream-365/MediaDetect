@@ -11,6 +11,15 @@ Use this skill when the user wants to organize **local** movie and TV files or
 directories. MediaDetect is the only detection source; this skill is the
 orchestration layer.
 
+## Prerequisites
+
+- Python 3.9+; the skill uses only the standard library.
+- The `mediadetect` binary must be on `PATH`, or passed via `--md-bin` /
+  `MD_BIN`. Install it with
+  `go install github.com/dream-365/MediaTitle/cmd/mediadetect@v0.3.0`.
+- `mediadetect` must report JSON `schema_version` `"1"`.
+- Optional: `TMDB_API_KEY` enables TMDB matching.
+
 ## Safety contract
 
 - Never modify media files before the user has seen a plan and explicitly
