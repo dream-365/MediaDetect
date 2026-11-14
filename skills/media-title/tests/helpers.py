@@ -217,7 +217,7 @@ def fake_result(path: str, match_mode: str = "off") -> Dict[str, Any]:
 
 class FakeRunner:
     def version(self) -> Dict[str, Any]:
-        return {"name": "mediadetect", "schema_version": "1", "version": "0.2.1"}
+        return {"name": "mediadetect", "schema_version": "1", "version": "0.2.2"}
 
     def detect(self, path: str, match: str = "off", probe: str = "off", max_files: int = 5000) -> Dict[str, Any]:
         return fake_result(path, match)

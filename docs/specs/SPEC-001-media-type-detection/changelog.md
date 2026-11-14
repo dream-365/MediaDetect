@@ -8,6 +8,17 @@ updated_at: 2026-11-12
 
 # Changelog: SPEC-001 MediaDetect 媒体检测库与 CLI
 
+## [2026-11-14] - v0.2.2 硬年份封顶与版本链
+
+- **修改类型**: Changed
+- **影响范围**: §2.1 G4；§4.4.4；§4.5.3；附录 B；`tasks.md` 的 `spec_sha256`
+- **变更原因**: 完成 SPEC-004 T5 版本收尾，并记录 v0.2.2 的 matcher 安全收紧。按 CLAUDE.md，先把本 Spec 状态回退为 `In Review`、更新 `updated_at`、记录变更；修订后恢复 `Approved`。
+- **具体内容**:
+  - §4.4.4 增加 v0.2.2 patch 说明：硬年份封顶不改 Go API/JSON schema，只新增 `match.year_conflict` warning。
+  - §4.5.3 增加 `|tmdb_year - file_year| > 5` 的封顶规则：runtime 成立保留原 confidence，否则最高 low；均输出 warning。
+  - G4 明确该安全收紧不属于“提高匹配率的新规则”；附录 B 增加对应已知限制行。
+  - 重算 `tasks.md` 的 `spec_sha256`。
+
 ## [2026-11-12] - SPEC-003 G6 连续多集解析
 
 - **修改类型**: Changed

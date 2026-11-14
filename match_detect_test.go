@@ -1,11 +1,15 @@
 package mediadetect
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/dream-365/MediaDetect/matcher"
+	"github.com/dream-365/MediaDetect/tmdb"
 )
 
 func tmdbServer(t *testing.T, search func(query string) []map[string]any, details map[int]map[string]any) *httptest.Server {
@@ -342,5 +346,44 @@ func TestDetectAutoUnavailableAndOnError(t *testing.T) {
 	on := detectOK(t, root, mockOptions(srv.URL, MatchOn))
 	if on.Match.Status != "error" || on.Match.Error == nil || on.Match.Error.Code != ErrTMDBUnavailable {
 		t.Fatalf("on match = %+v", on.Match)
+	}
+}
+
+func TestWarningSetDeduplicatesByCodeDetailAndFile(t *testing.T) {
+	warnings := newWarningSet()
+	file := "Movie.2022.mkv"
+	warnings.add("match.year_conflict", "detail-a", &file)
+	warnings.add("match.year_conflict", "detail-b", &file)
+	warnings.add("match.year_conflict", "detail-a", &file)
+	list := warnings.list()
+	if len(list) != 2 {
+		t.Fatalf("warnings = %+v, want 2 unique code/detail/file entries", list)
+	}
+	if list[0].Detail == list[1].Detail {
+		t.Fatalf("warnings = %+v, want distinct details", list)
+	}
+}
+
+func TestBuildMatchAddsMatcherWarnings(t *testing.T) {
+	warnings := newWarningSet()
+	res := matcher.Result{
+		Candidates: []matcher.Scored{{
+			Movie: tmdb.Movie{ID: 1, Title: "Example", IMDbID: "tt1"},
+			Score: 0.8,
+		}},
+		Confidence: "low",
+		Margin:     0.1,
+		Warnings: []matcher.MatchWarning{{
+			Code:   "match.year_conflict",
+			Detail: "year_delta=38 file_year=2022 tmdb_year=1984 runtime_ok=false",
+		}},
+	}
+	match := buildMatch(context.Background(), res, "Movie.2022.mkv", &tmdb.Client{}, 3, warnings)
+	if match.Status != "low" {
+		t.Fatalf("status = %s, want low", match.Status)
+	}
+	list := warnings.list()
+	if len(list) != 1 || list[0].Code != "match.year_conflict" || list[0].File == nil || *list[0].File != "Movie.2022.mkv" {
+		t.Fatalf("warnings = %+v", list)
 	}
 }

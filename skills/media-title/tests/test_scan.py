@@ -14,10 +14,67 @@ def write(path, data="x"):
         fh.write(data)
 
 
+class CountingRunner(FakeRunner):
+    def __init__(self):
+        self.calls = []
+
+    def detect(self, path, match="off", probe="off", max_files=5000):
+        self.calls.append(path)
+        return super().detect(path, match, probe, max_files)
+
+
 class ScanTests(unittest.TestCase):
     def run_scan(self, path, **kwargs):
         with patch.object(scan_mod, "MediaDetectRunner", lambda _bin: FakeRunner()):
             return scan_mod.scan_path(path, md_bin="fake", **kwargs)
+
+    def run_counting_scan(self, path, **kwargs):
+        runner = CountingRunner()
+        with patch.object(scan_mod, "MediaDetectRunner", lambda _bin: runner):
+            result = scan_mod.scan_path(path, md_bin="fake", **kwargs)
+        return result, runner.calls
+
+    def test_organized_directory_is_skipped_without_detect(self):
+        with tempfile.TemporaryDirectory() as root:
+            tagged = os.path.join(root, "Movies", "X (2020) {tt1234567}")
+            write(os.path.join(tagged, "X.2020.mkv"))
+            result, calls = self.run_counting_scan(tagged)
+            self.assertEqual(result["units"], [])
+            self.assertEqual(result["unplanned"], [])
+            self.assertEqual(result["skipped"][0]["path"], tagged)
+            self.assertEqual(result["skipped"][0]["reason_code"], "already_organized")
+            self.assertEqual(calls, [])
+
+    def test_organized_file_is_skipped_without_detect(self):
+        with tempfile.TemporaryDirectory() as root:
+            tagged = os.path.join(root, "X (2020) {tmdb42}.mkv")
+            write(tagged)
+            result, calls = self.run_counting_scan(tagged)
+            self.assertEqual(result["units"], [])
+            self.assertEqual(result["skipped"][0]["path"], tagged)
+            self.assertEqual(calls, [])
+
+    def test_organized_child_is_not_detected_or_recursed(self):
+        with tempfile.TemporaryDirectory() as root:
+            base = os.path.join(root, "Movies")
+            tagged = os.path.join(base, "X (2020) {tt1234567}")
+            write(os.path.join(tagged, "Season 01", "X.S01E01.mkv"))
+            normal = os.path.join(base, "Y (2021)")
+            write(os.path.join(normal, "Y.2021.mkv"))
+            result, calls = self.run_counting_scan(base, mode="library")
+            self.assertIn(tagged, [item["path"] for item in result["skipped"]])
+            self.assertNotIn(tagged, calls)
+            self.assertFalse(any(path.startswith(tagged + os.sep) for path in calls))
+            self.assertTrue(any(path == normal for path in calls))
+            self.assertEqual(len(result["units"]), 1)
+            self.assertEqual(result["units"][0]["source_root"], normal)
+
+    def test_include_organized_forces_detection(self):
+        with tempfile.TemporaryDirectory() as root:
+            tagged = os.path.join(root, "Movies", "X (2020) {tt1234567}")
+            write(os.path.join(tagged, "X.2020.mkv"))
+            _result, calls = self.run_counting_scan(tagged, include_organized=True)
+            self.assertIn(tagged, calls)
 
     def test_generic_downloads_single_movie_stays_file_unit(self):
         with tempfile.TemporaryDirectory() as root:

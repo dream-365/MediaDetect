@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import errno
+import json
 import os
 import tempfile
 import unittest
@@ -9,6 +11,7 @@ from unittest.mock import patch
 
 from helpers import FakeRunner, SCRIPTS_DIR  # noqa: F401
 
+from media_title_lib import fsops
 from media_title_lib import scan as scan_mod
 from media_title_lib.apply import ApplyError, apply_plan, reconcile
 from media_title_lib.paths import lstat_state, protected_root, subtree_fingerprint
@@ -43,7 +46,7 @@ def manual_plan(root, units):
         "session_token": session["session_token"],
         "state_dir": session["state_dir"],
         "generated_at": "2026-01-01T00:00:00Z",
-        "tool_version": "0.1.0",
+        "tool_version": "0.1.1",
         "root": root,
         "mode": "test",
         "options": {},
@@ -56,6 +59,21 @@ def manual_plan(root, units):
     }
     plan["plan_id"] = content_hash(plan)
     return plan
+
+
+class NoReplaceOptionTests(unittest.TestCase):
+    def test_env_and_cli_precedence(self):
+        from types import SimpleNamespace
+        from media_title import _no_replace_mode
+
+        args = SimpleNamespace(no_replace=None)
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("MEDIA_TITLE_ALLOW_CHECK_RENAME", None)
+            self.assertEqual(_no_replace_mode(args), "strict")
+            os.environ["MEDIA_TITLE_ALLOW_CHECK_RENAME"] = "1"
+            self.assertEqual(_no_replace_mode(args), "check")
+            args.no_replace = "strict"
+            self.assertEqual(_no_replace_mode(args), "strict")
 
 
 class ScanRegressionTests(unittest.TestCase):
@@ -72,6 +90,199 @@ class ScanRegressionTests(unittest.TestCase):
             target = plan["units"][0]["target"]["path"]
             self.assertEqual(os.path.dirname(target), os.path.dirname(movie))
             self.assertFalse(target.startswith(movie + os.sep))
+
+    def test_low_confidence_unit_is_unplanned(self):
+        with tempfile.TemporaryDirectory() as root:
+            base = os.path.join(root, "Downloads")
+            video = os.path.join(base, "Inception.2010.mkv")
+            write(video)
+            scan = scan_with_fake(video)
+            unit = scan["units"][0]
+            unit.update({"match_status": "low", "match_score": 1.0,
+                         "title_hit": True, "match_margin": 0.05})
+            plan = build_plan(scan)
+            self.assertFalse(plan["units"])
+            self.assertIn("low_confidence",
+                          [item["reason_code"] for item in plan["unplanned"]])
+
+    def test_match_warnings_reach_plan(self):
+        with tempfile.TemporaryDirectory() as root:
+            base = os.path.join(root, "Downloads")
+            video = os.path.join(base, "Inception.2010.mkv")
+            write(video)
+            scan = scan_with_fake(video)
+            scan["warnings"].append({
+                "code": "match.year_conflict",
+                "detail": "year_delta=38 file_year=2022 tmdb_year=1984",
+                "file": "Inception.2010.mkv",
+            })
+            plan = build_plan(scan)
+            self.assertIn("match.year_conflict",
+                          [w["code"] for w in plan["warnings"]])
+
+    def test_skill_version_reaches_scan_and_plan(self):
+        from media_title_lib import __version__
+
+        self.assertEqual(__version__, "0.1.1")
+        with tempfile.TemporaryDirectory() as root:
+            video = os.path.join(root, "Downloads", "Inception.2010.mkv")
+            write(video)
+            scan = scan_with_fake(video)
+            self.assertEqual(scan["tool_version"], __version__)
+            plan = build_plan(scan)
+            self.assertEqual(plan["tool_version"], __version__)
+
+    def test_a1_a2_offline_fixture_plan_regression(self):
+        fixtures = os.path.join(os.path.dirname(__file__), "fixtures")
+        with open(os.path.join(fixtures, "a1-scan.json"), encoding="utf-8") as fh:
+            a1_plan = build_plan(json.load(fh))
+        with open(os.path.join(fixtures, "a2-scan.json"), encoding="utf-8") as fh:
+            a2_plan = build_plan(json.load(fh))
+        for name, plan in (("a1", a1_plan), ("a2", a2_plan)):
+            self.assertFalse(plan["units"], name)
+            self.assertIn("low_confidence",
+                          [item["reason_code"] for item in plan["unplanned"]],
+                          name)
+        self.assertIn("match.year_conflict",
+                      [w["code"] for w in a1_plan["warnings"]])
+        self.assertFalse(a2_plan["warnings"])
+
+    def test_detection_warning_reaches_unit_and_plan(self):
+        class WarningRunner(FakeRunner):
+            def detect(self, path, match="off", probe="off", max_files=5000):
+                result = super().detect(path, match, probe, max_files)
+                if match != "off" and os.path.isfile(path):
+                    result["detection"]["warnings"] = [{
+                        "code": "match.year_conflict",
+                        "detail": "year_delta=-38 file_year=2022 tmdb_year=1984",
+                        "file": os.path.basename(path),
+                    }]
+                return result
+
+        with tempfile.TemporaryDirectory() as root:
+            video = os.path.join(root, "Downloads", "Give.Me.Five.2022.mkv")
+            write(video)
+            with patch.object(scan_mod, "MediaDetectRunner",
+                              lambda _bin: WarningRunner()):
+                scan = scan_mod.scan_path(video, md_bin="fake")
+            self.assertEqual(scan["units"][0]["warnings"][0]["code"],
+                             "match.year_conflict")
+            plan = build_plan(scan)
+            self.assertIn("match.year_conflict",
+                          [w["code"] for w in plan["units"][0]["warnings"]])
+            self.assertIn("match.year_conflict",
+                          [w["code"] for w in plan["warnings"]])
+
+    def test_medium_planned_unit_has_review_warning(self):
+        with tempfile.TemporaryDirectory() as root:
+            video = os.path.join(root, "Downloads", "Inception.2010.mkv")
+            write(video)
+            scan = scan_with_fake(video)
+            scan["units"][0].update({
+                "match_status": "medium", "match_score": 0.7,
+                "title_hit": True,
+            })
+            plan = build_plan(scan)
+            self.assertEqual(plan["units"][0]["match_status"], "medium")
+            self.assertIn("medium_confidence",
+                          [w["code"] for w in plan["units"][0]["warnings"]])
+            self.assertIn("medium_confidence",
+                          [w["code"] for w in plan["warnings"]])
+
+    def test_single_mode_skips_organized_file(self):
+        with tempfile.TemporaryDirectory() as root:
+            base = os.path.join(root, "Downloads")
+            video = os.path.join(base, "X (2020) {tt1234567}.mkv")
+            write(video)
+            scan = scan_with_fake(base, mode="single", match="off")
+            self.assertFalse(scan["units"])
+            self.assertEqual(scan["mode"], "single")
+            self.assertEqual(scan["skipped"][0]["reason_code"],
+                             "already_organized")
+
+    def test_reconcile_check_intent_ignores_file_mtime_rewrite(self):
+        with tempfile.TemporaryDirectory() as root:
+            src = os.path.join(root, "a.mkv")
+            write(src)
+            dst = os.path.join(root, "Out", "a.mkv")
+            os.makedirs(os.path.dirname(dst))
+            plan = manual_plan(root, [])
+            from_state = lstat_state(src)
+            append_jsonl(session_files(plan["state_dir"])["apply_log"], {
+                "session_id": plan["session_id"],
+                "session_token": plan["session_token"],
+                "plan_id": plan["plan_id"],
+                "state_dir": plan["state_dir"],
+                "unit": "u1", "phase": "intent", "op": "move",
+                "from": src, "to": dst, "from_state": from_state,
+                "to_absent": True, "move_method": "check_then_rename",
+                "atomic": False, "validation": "size_mtime",
+            })
+            os.rename(src, dst)
+            os.utime(dst, ns=(from_state["mtime_ns"] + 1_000_000_000,
+                              from_state["mtime_ns"] + 1_000_000_000))
+            self.assertEqual(reconcile(plan, strict=False), [])
+            done = [r for r in read_jsonl(
+                session_files(plan["state_dir"])["apply_log"])
+                if r.get("phase") == "done"]
+            self.assertEqual(done[0]["validation"], "size_content")
+
+    def test_reconcile_check_intent_ignores_directory_mtime_rewrite(self):
+        with tempfile.TemporaryDirectory() as root:
+            src = os.path.join(root, "Movie")
+            write(os.path.join(src, "a.mkv"))
+            dst = os.path.join(root, "Out")
+            plan = manual_plan(root, [])
+            from_state = lstat_state(src)
+            from_content, count = subtree_fingerprint(
+                src, portable=True, include_mtime=False)
+            append_jsonl(session_files(plan["state_dir"])["apply_log"], {
+                "session_id": plan["session_id"],
+                "session_token": plan["session_token"],
+                "plan_id": plan["plan_id"],
+                "state_dir": plan["state_dir"],
+                "unit": "u1", "phase": "intent", "op": "move",
+                "from": src, "to": dst, "from_state": from_state,
+                "from_content_hash": from_content, "entry_count": count,
+                "to_absent": True, "move_method": "check_then_rename",
+                "atomic": False, "validation": "portable_subtree",
+            })
+            os.rename(src, dst)
+            os.utime(dst, ns=(from_state["mtime_ns"] + 1_000_000_000,
+                              from_state["mtime_ns"] + 1_000_000_000))
+            self.assertEqual(reconcile(plan, strict=False), [])
+            done = [r for r in read_jsonl(
+                session_files(plan["state_dir"])["apply_log"])
+                if r.get("phase") == "done"]
+            self.assertEqual(done[0]["validation"], "size_content")
+            self.assertIn("to_content_hash", done[0])
+
+    def test_disabled_local_match_is_still_planned(self):
+        with tempfile.TemporaryDirectory() as root:
+            base = os.path.join(root, "Downloads")
+            video = os.path.join(base, "Inception.2010.mkv")
+            write(video)
+            scan = scan_with_fake(video, match="off")
+            unit = scan["units"][0]
+            unit.update({"match_status": "disabled", "match_score": 0,
+                         "title_hit": False})
+            plan = build_plan(scan)
+            self.assertEqual(len(plan["units"]), 1)
+
+    def test_part_movie_requires_tmdb_title_proof(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = os.path.join(root, "Harry.Potter.Part.1.2010.mkv")
+            write(path)
+            with patch.object(scan_mod, "MediaDetectRunner",
+                              lambda _bin: FakeRunner()):
+                with patch.object(scan_mod, "part_title_matches", return_value=True):
+                    result = scan_mod.scan_path(path, md_bin="fake")
+                self.assertEqual(len(result["units"]), 1)
+                with patch.object(scan_mod, "part_title_matches", return_value=False):
+                    result = scan_mod.scan_path(path, md_bin="fake")
+                self.assertFalse(result["units"])
+                self.assertIn("unsupported_multipart",
+                              [item["reason_code"] for item in result["unplanned"]])
 
     def test_directory_scan_marks_non_contiguous_multi_episode(self):
         with tempfile.TemporaryDirectory() as root:
@@ -186,7 +397,8 @@ class ScanRegressionTests(unittest.TestCase):
             result = scan_with_fake(os.path.join(root, "TV"), mode="library")
             self.assertEqual(len(result["units"]), 1)
             self.assertEqual(result["units"][0]["context"]["show"], "Show")
-            self.assertIn("container_name_ignored", result["units"][0]["warnings"])
+            self.assertIn("container_name_ignored",
+                          [w["code"] for w in result["units"][0]["warnings"]])
 
     def test_mixed_root_groups_loose_episodes(self):
         with tempfile.TemporaryDirectory() as root:
@@ -469,6 +681,105 @@ class ApplyRegressionTests(unittest.TestCase):
             self.assertEqual(result["applied"], ["u2"])
             self.assertTrue(os.path.exists(d))
             self.assertFalse(os.path.exists(c))
+
+    def _check_rename_plan(self, root):
+        src = os.path.join(root, "a.mkv")
+        write(src)
+        target = os.path.join(root, "Out")
+        target_file = os.path.join(target, "a.mkv")
+        unit = {
+            "id": "u1", "kind": "movie", "status": "planned",
+            "sources": [{"path": src, "kind": "file", "state": lstat_state(src)}],
+            "sibling_snapshot": {root: ["a.mkv"]},
+            "target": {"path": target, "kind": "directory"},
+            "operations": [
+                {"op": "mkdir", "path": target, "pre_exists": False, "pre_state": None},
+                {"op": "move", "from": src, "to": target_file,
+                 "from_state": lstat_state(src)}],
+        }
+        return manual_plan(root, [unit]), src, target, target_file
+
+    def _no_native_no_link(self):
+        return (
+            patch.object(fsops, "_rename_noreplace",
+                         side_effect=OSError(errno.ENOTSUP, "not supported")),
+            patch.object(fsops.os, "link",
+                         side_effect=OSError(errno.EPERM, "hard links disabled")),
+        )
+
+    def test_strict_mode_rejects_unavailable_no_replace(self):
+        with tempfile.TemporaryDirectory() as root:
+            plan, src, _target, target_file = self._check_rename_plan(root)
+            native, link = self._no_native_no_link()
+            with native, link:
+                with self.assertRaises(ApplyError) as ctx:
+                    apply_plan(plan, plan["plan_id"], "u1")
+            self.assertEqual(ctx.exception.code, "E_NO_REPLACE_UNSUPPORTED")
+            self.assertTrue(os.path.exists(src))
+            self.assertFalse(os.path.exists(target_file))
+
+    def test_check_mode_applies_and_warns(self):
+        with tempfile.TemporaryDirectory() as root:
+            plan, _src, _target, target_file = self._check_rename_plan(root)
+            native, link = self._no_native_no_link()
+            with native, link:
+                result = apply_plan(plan, plan["plan_id"], "u1", no_replace="check")
+            self.assertEqual(result["applied"], ["u1"])
+            self.assertEqual(result["warnings"][0]["code"], "non_atomic_move")
+            self.assertTrue(os.path.exists(target_file))
+            records = read_jsonl(session_files(plan["state_dir"])["apply_log"])
+            moves = [r for r in records if r.get("op") == "move"]
+            self.assertTrue(moves)
+            self.assertTrue(all(r.get("move_method") == "check_then_rename"
+                                for r in moves))
+
+    def test_check_mode_survives_smb_mtime_rewrite(self):
+        with tempfile.TemporaryDirectory() as root:
+            plan, src, _target, target_file = self._check_rename_plan(root)
+            real_rename = os.rename
+            real_utime = os.utime
+
+            def rewriting_rename(a, b):
+                real_rename(a, b)
+                st = os.stat(b)
+                real_utime(b, ns=(st.st_mtime_ns + 1_000_000_000,
+                                  st.st_mtime_ns + 1_000_000_000))
+
+            native, link = self._no_native_no_link()
+            with native, link, \
+                    patch.object(fsops.os, "rename", side_effect=rewriting_rename), \
+                    patch.object(fsops.os, "utime",
+                                 side_effect=OSError(errno.EPERM, "utime denied")):
+                result = apply_plan(plan, plan["plan_id"], "u1", no_replace="check")
+                self.assertEqual(result["applied"], ["u1"])
+                self.assertIn("mtime_rewritten",
+                              [w["code"] for w in result["warnings"]])
+                self.assertTrue(os.path.exists(target_file))
+                rolled = rollback_plan(plan, plan["plan_id"], no_replace="check")
+            self.assertTrue(rolled["ok"])
+            self.assertIn("mtime_rewritten",
+                          [w["code"] for w in rolled["warnings"]])
+            self.assertTrue(os.path.exists(src))
+            self.assertFalse(os.path.exists(target_file))
+
+    def test_check_mode_rollback_requires_opt_in(self):
+        with tempfile.TemporaryDirectory() as root:
+            plan, src, _target, target_file = self._check_rename_plan(root)
+            native, link = self._no_native_no_link()
+            with native, link:
+                apply_plan(plan, plan["plan_id"], "u1", no_replace="check")
+                with self.assertRaises(RollbackError) as ctx:
+                    rollback_plan(plan, plan["plan_id"])
+                self.assertEqual(ctx.exception.code, "E_NO_REPLACE_UNSUPPORTED")
+                self.assertIn("MEDIA_TITLE_ALLOW_CHECK_RENAME=1",
+                              str(ctx.exception))
+                self.assertTrue(os.path.exists(target_file))
+                self.assertFalse(os.path.exists(src))
+                result = rollback_plan(plan, plan["plan_id"], no_replace="check")
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["warnings"][0]["code"], "non_atomic_move")
+            self.assertTrue(os.path.exists(src))
+            self.assertFalse(os.path.exists(target_file))
 
     def test_reconcile_same_path_never_unlinks(self):
         with tempfile.TemporaryDirectory() as root:

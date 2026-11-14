@@ -43,15 +43,18 @@ func TestExactTitleAndYearIsHigh(t *testing.T) {
 	}
 }
 
-func TestWrongYearWithoutRuntimeIsMedium(t *testing.T) {
+func TestWrongYearWithoutRuntimeIsLow(t *testing.T) {
 	c := clientFor(t, `{"results":[{"id":1,"title":"示例电影","original_title":"Blood Diamond","release_date":"2006-12-08"}]}`)
 	m := &Matcher{Client: c}
 	res, err := m.Match(context.Background(), parser.Hints{TitleCandidates: []string{"Blood Diamond"}, YearCandidates: []int{2020}}, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Confidence != "medium" {
-		t.Fatalf("confidence = %s, want medium", res.Confidence)
+	if res.Confidence != "low" {
+		t.Fatalf("confidence = %s, want low", res.Confidence)
+	}
+	if len(res.Warnings) == 0 || res.Warnings[0].Code != "match.year_conflict" {
+		t.Fatalf("warnings = %+v, want match.year_conflict", res.Warnings)
 	}
 }
 
@@ -71,6 +74,9 @@ func TestWrongYearWithRuntimeMatchIsHigh(t *testing.T) {
 	}
 	if res.Confidence != "high" {
 		t.Fatalf("confidence = %s, want high", res.Confidence)
+	}
+	if len(res.Warnings) == 0 || res.Warnings[0].Code != "match.year_conflict" {
+		t.Fatalf("warnings = %+v, want match.year_conflict", res.Warnings)
 	}
 }
 
@@ -220,5 +226,20 @@ func TestNoResultsIsUnmatched(t *testing.T) {
 	}
 	if res.Confidence != "unmatched" {
 		t.Fatalf("confidence = %s, want unmatched", res.Confidence)
+	}
+}
+
+func TestSoftYearConflictKeepsMedium(t *testing.T) {
+	c := clientFor(t, `{"results":[{"id":1,"title":"示例电影","original_title":"Ant-Man and the Wasp","release_date":"2018-07-06"}]}`)
+	m := &Matcher{Client: c}
+	res, err := m.Match(context.Background(), parser.Hints{TitleCandidates: []string{"Ant-Man and the Wasp"}, YearCandidates: []int{2022}}, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Confidence != "medium" {
+		t.Fatalf("confidence = %s, want medium", res.Confidence)
+	}
+	if len(res.Warnings) != 0 {
+		t.Fatalf("warnings = %+v, want none for delta<=5", res.Warnings)
 	}
 }

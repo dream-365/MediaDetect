@@ -149,20 +149,26 @@ def _check_done_record(
                                 "move path is outside plan root: %s -> %s" % (src, dst))
         from_state = record.get("from_state") or {}
         to_state = record.get("to_state") or {}
+        portable = record.get("move_method") == fsops.MOVE_CHECK
+        content_only = portable and record.get("validation") == "size_content"
         src_exists = os.path.lexists(src)
         dst_exists = os.path.lexists(dst)
         if src_exists and not dst_exists:
-            if _state_matches(src, from_state):
+            if _state_matches(src, from_state, portable=portable,
+                              content_only=content_only):
                 return "already"
             raise RollbackError("E_ROLLBACK_CONFLICT", "source changed: %s" % src)
         if not dst_exists:
             raise RollbackError("E_ROLLBACK_CONFLICT", "target missing: %s" % dst)
-        if not _state_matches(dst, to_state):
+        if not _state_matches(dst, to_state, portable=portable,
+                              content_only=content_only):
             raise RollbackError("E_ROLLBACK_CONFLICT", "target state changed: %s" % dst)
         if os.path.isdir(dst):
-            expected_hash = record.get("to_subtree_hash")
+            expected_hash = (record.get("to_content_hash") if content_only
+                             else record.get("to_subtree_hash"))
             if expected_hash:
-                current_hash, _count = subtree_fingerprint(dst)
+                current_hash, _count = subtree_fingerprint(
+                    dst, portable=portable, include_mtime=not content_only)
                 if current_hash != expected_hash:
                     raise RollbackError("E_ROLLBACK_CONFLICT", "target subtree changed: %s" % dst)
         if src_exists:
@@ -200,34 +206,72 @@ def _check_done_record(
     return "already"
 
 
-def _state_matches(path: str, expected: Dict[str, Any]) -> bool:
+def _state_matches(path: str, expected: Dict[str, Any],
+                   portable: bool = False, content_only: bool = False) -> bool:
     if not expected:
         return False
     try:
         current = lstat_state(path)
     except OSError:
         return False
-    keys = ("dev", "ino") if os.path.isdir(path) else ("dev", "ino", "size", "mtime_ns")
+    if content_only:
+        keys = () if os.path.isdir(path) else ("size",)
+    elif portable:
+        keys = ("mtime_ns",) if os.path.isdir(path) else ("size", "mtime_ns")
+    else:
+        keys = ("dev", "ino") if os.path.isdir(path) else ("dev", "ino", "size", "mtime_ns")
     for key in keys:
         if key in expected and current.get(key) != expected.get(key):
             return False
     return True
 
 
-def _reverse(plan: Dict[str, Any], record: Dict[str, Any], log_path: str) -> None:
+def _reverse(plan: Dict[str, Any], record: Dict[str, Any], log_path: str,
+             allow_check: bool = False,
+             warnings: Optional[List[Dict[str, Any]]] = None) -> None:
     op = record.get("op")
     unit = record.get("unit")
     if op == "move":
         src = record["from"]
         dst = record["to"]
+        method = record.get("move_method") or fsops.MOVE_NATIVE
+        portable = method == fsops.MOVE_CHECK
         intent = _base(plan, unit, phase="intent", op="move",
                        **{"from": dst, "to": src, "from_state": record.get("to_state"),
-                          "to_absent": True})
+                          "to_absent": True, "move_method": method,
+                          "atomic": not portable,
+                          "validation": record.get("validation") or "dev_ino"})
         append_jsonl(log_path, intent)
-        fsops.safe_move(dst, src)
+        move_info = fsops.safe_move(dst, src, allow_check=allow_check)
+        from_state = record.get("from_state") or {}
+        if move_info["method"] == fsops.MOVE_CHECK:
+            mtime = from_state.get("mtime_ns")
+            if mtime is not None:
+                try:
+                    os.utime(src, ns=(int(mtime), int(mtime)))
+                except OSError:
+                    pass
+            if warnings is not None:
+                warnings.append({
+                    "code": "non_atomic_move",
+                    "path": src,
+                    "method": fsops.MOVE_CHECK,
+                    "atomic": False,
+                    "validation": move_info["validation"],
+                })
+                if move_info["validation"] == "size_content":
+                    warnings.append({
+                        "code": "mtime_rewritten",
+                        "path": src,
+                        "method": fsops.MOVE_CHECK,
+                        "atomic": False,
+                    })
         done = _base(plan, unit, phase="done", op="move",
                      **{"from": dst, "to": src, "from_state": record.get("to_state"),
-                        "to_state": lstat_state(src), "result": "ok"})
+                        "to_state": lstat_state(src), "result": "ok",
+                        "move_method": move_info["method"],
+                        "atomic": bool(move_info["atomic"]),
+                        "validation": move_info["validation"]})
         append_jsonl(log_path, done)
     elif op == "mkdir":
         path = record["path"]
@@ -254,7 +298,11 @@ def rollback_plan(
     plan: Dict[str, Any],
     expect_plan_id: str,
     select: Optional[str] = None,
+    no_replace: str = "strict",
 ) -> Dict[str, Any]:
+    if no_replace not in ("strict", "check"):
+        raise RollbackError("E_USAGE", "--no-replace must be strict or check", exit_code=1)
+    allow_check = no_replace == "check"
     validate_plan(plan, expect_plan_id)
     root = plan.get("root") or ""
     assert_state_dir(root, plan.get("session_id") or "", plan.get("state_dir") or "")
@@ -269,6 +317,16 @@ def rollback_plan(
             raise RollbackError("E_SESSION_STATE_MISSING", "state token mismatch")
         if state.get("plan_id") != plan.get("plan_id"):
             raise RollbackError("E_EXPECT_PLAN_MISMATCH", "state plan_id mismatch")
+        for log_name in ("apply_log", "rollback_log"):
+            for record in read_jsonl(session_files(state_dir)[log_name]):
+                if (record.get("op") == "move"
+                        and record.get("move_method") == fsops.MOVE_CHECK
+                        and not allow_check):
+                    raise RollbackError(
+                        "E_NO_REPLACE_UNSUPPORTED",
+                        "rollback log contains check-then-rename moves; "
+                        "rerun with --no-replace=check or "
+                        "MEDIA_TITLE_ALLOW_CHECK_RENAME=1")
         conflicts = reconcile(plan, strict=False)
         _reconcile_rollback_log(plan)
         if select and select != "all":
@@ -310,11 +368,13 @@ def rollback_plan(
         save_state(plan, state)
         log_path = session_files(state_dir)["rollback_log"]
         rolled = []
+        warnings: List[Dict[str, Any]] = []
         for record, action in reversed(planned):
             if action == "already":
                 continue
             try:
-                _reverse(plan, record, log_path)
+                _reverse(plan, record, log_path, allow_check=allow_check,
+                         warnings=warnings)
             except RollbackError:
                 raise
             except OSError as exc:
@@ -329,4 +389,4 @@ def rollback_plan(
             item["updated_at"] = utc_now()
         save_state(plan, state)
         return {"ok": True, "rolled_back": rolled, "conflicts": conflicts,
-                "plan_id": plan.get("plan_id")}
+                "warnings": warnings, "plan_id": plan.get("plan_id")}

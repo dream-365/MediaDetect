@@ -40,13 +40,22 @@ SEASON_ANY_RE = re.compile(r"(?i)(?:^|[._\s-])(?:season\s*0?(\d{1,2})|s0?(\d{1,2
 CJK_SEASON_ANY_RE = re.compile(r"第\s*(\d{1,2})\s*季")
 EPISODE_ANY_RE = re.compile(r"(?i)s(\d{1,2})\s*[._-]?\s*e(\d{1,3})((?:\s*[._-]?\s*e\d{1,3})*)")
 CJK_EPISODE_ANY_RE = re.compile(r"第\s*(\d{1,3})\s*集")
-MULTIPART_RES = (
+MULTIPART_HARD_RES = (
     re.compile(r"(?i)(?:^|[._\s-])(?:cd|disc|disk)\s*[._-]?\s*(\d{1,2})(?:$|[._\s-])"),
-    re.compile(r"(?i)(?:^|[._\s-])(?:part|pt)\s*[._-]?\s*([a-z0-9]{1,2})(?:$|[._\s-])"),
+    re.compile(r"(?i)(?:^|[._\s-])(?:part|pt)(?=[._\s-])\s*[._-]?\s*([ab])(?:$|[._\s-])"),
     re.compile(r"(?i)(?:^|[._\s-])\d+\s*of\s*\d+(?:$|[._\s-])"),
+    re.compile(r"(?:^|[._\s-])\d{1,2}\s*-\s*\d{1,2}(?:$|[._\s-])"),
     re.compile(r"(?:上集|下集|上部|下部|前篇|后篇)"),
-    re.compile(r"(?i)[._\s-][ab](?:$|[._\s-])"),
 )
+MULTIPART_PART_RE = re.compile(
+    r"(?i)(?:^|[._\s-])(?:part|pt)(?=[._\s-]|\d)[._\s-]?(\d{1,2})(?:$|[._\s-])"
+)
+PART_TITLE_RE = re.compile(r"(?i)(?:^|\s)part\s*(\d{1,2})(?:\s|$)")
+ORGANIZED_ID_RE = re.compile(r"\{(?:tt\d+|tmdb\d+)\}", re.IGNORECASE)
+
+
+def is_organized_name(name: str) -> bool:
+    return bool(ORGANIZED_ID_RE.search(nfc(name or "")))
 RELEASE_TAG_RE = re.compile(
     r"(?i)(?:^|[._\s-])("
     r"2160p|1080p|720p|480p|4k|uhd|bluray|blu-ray|web-dl|webrip|hdtv|dvdrip|"
@@ -207,8 +216,13 @@ def nearest_existing(path: str) -> str:
     return current
 
 
-def subtree_fingerprint(path: str) -> Tuple[str, int]:
-    """SHA-256 over sorted relative metadata of a directory subtree."""
+def subtree_fingerprint(path: str, portable: bool = False,
+                        include_mtime: bool = True) -> Tuple[str, int]:
+    """SHA-256 over sorted relative metadata of a directory subtree.
+
+    ``portable`` omits dev/ino so SMB and other filesystems with unstable
+    inode numbers can still compare the same tree before and after a move.
+    """
     root = os.path.abspath(path)
     lines: List[str] = []
     count = 0
@@ -218,10 +232,18 @@ def subtree_fingerprint(path: str) -> Tuple[str, int]:
         except OSError:
             continue
         kind = "d" if is_directory else "f"
-        line = "%s\t%s\t%d\t%d\t%d\t%d" % (
-            kind, rel, state["dev"], state["ino"],
-            state.get("size", 0), state["mtime_ns"],
-        )
+        if portable:
+            if include_mtime:
+                line = "%s\t%s\t%d\t%d" % (
+                    kind, rel, state.get("size", 0), state["mtime_ns"],
+                )
+            else:
+                line = "%s\t%s\t%d" % (kind, rel, state.get("size", 0))
+        else:
+            line = "%s\t%s\t%d\t%d\t%d\t%d" % (
+                kind, rel, state["dev"], state["ino"],
+                state.get("size", 0), state["mtime_ns"],
+            )
         lines.append(line)
         count += 1
     lines.sort()
@@ -311,13 +333,37 @@ def cjk_episode_any(name: str) -> Optional[int]:
     return int(m.group(1)) if m else None
 
 
-def multipart_token(name: str) -> Optional[str]:
+def multipart_token(name: str, allow_part: bool = False) -> Optional[str]:
+    """Return a hard multipart token; Part N is a candidate unless not allowed."""
     text = nfc(name)
-    for index, regex in enumerate(MULTIPART_RES):
-        m = regex.search(text)
-        if m:
+    for index, regex in enumerate(MULTIPART_HARD_RES):
+        if regex.search(text):
             return "multipart_%d" % index
+    stem = normalize_title(os.path.splitext(text)[0])
+    if re.search(r"(?:^|[._\s-])[ab]$", stem):
+        return "multipart_letter"
+    if not allow_part and MULTIPART_PART_RE.search(text):
+        return "multipart_part"
     return None
+
+
+def part_movie_number(name: str) -> Optional[int]:
+    match = MULTIPART_PART_RE.search(nfc(name))
+    return int(match.group(1)) if match else None
+
+
+def part_title_matches(number: int, best: Optional[Dict[str, Any]]) -> bool:
+    if not best or best.get("local"):
+        return False
+    for key in ("title", "original_title"):
+        value = best.get(key)
+        if not value:
+            continue
+        normalized = normalize_title(str(value))
+        for match in PART_TITLE_RE.finditer(normalized):
+            if int(match.group(1)) == int(number):
+                return True
+    return False
 
 
 def is_generic_container(name: str) -> bool:

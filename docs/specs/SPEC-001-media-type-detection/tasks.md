@@ -4,8 +4,8 @@ status: In Progress
 owner: alang
 depends_on: []
 spec: ./spec.md
-spec_sha256: "572b24e9d1ae4500437f499be177587cdf6658dbbb7fd6d3d9327d7318692ff9"
-updated_at: 2026-11-12
+spec_sha256: "fa2abe6023226e19d132ab6f0ea54dc1c89970d4048b0552d9a2ebf71b615817"
+updated_at: 2026-11-14
 ---
 
 # MediaDetect v0.1.0 执行拆解
@@ -23,6 +23,8 @@ updated_at: 2026-11-12
 | T7 | CLI：单 JSON、stdin、flags 与退出码 | G1 | T6 | `cmd/mediadetect/` | 文件/目录/stdin/缺参/路径不存在/无 key/`--match=off` 七类 golden 通过；stdout 恰好一个 JSON；`--version` 与 `--help` 行为符合契约；运行前后输入树快照一致 | `go test ./cmd/mediadetect` |
 | T8 | 类型与匹配校准报告 | G3, G4 | T5, T7 | `docs/quality/SPEC-001/calibration-report.md` | 报告包含冻结样本、混淆矩阵、逐类 precision/recall、high/medium 匹配率、`imdb_id` 非空率、错误清单；已完成 10 部真实电影抽测为 `imdb_id` 10/10，≥100 个真实目录样本与 225 文件全量 `imdb_id` 复测待补 | `docs/quality/SPEC-001/calibration-report.md` |
 | T9 | 发布与消费验证 | G2 | T1, T2, T3, T4, T5, T6, T7 | `—` | `v0.1.0` 的 tag 与 CI 在同一 SHA；干净缓存下 `go list -m` 与 `go install` 成功；`--version` 输出 `0.1.0` | `sh -c 'git tag --list v0.1.0'` |
+
+> 本文件保留 v0.1.0 历史交付基线；v0.2.2 的硬年份封顶与 warning 由 SPEC-004 T5 跟踪。
 
 ## 后续
 

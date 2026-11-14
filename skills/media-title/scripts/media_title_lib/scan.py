@@ -12,7 +12,7 @@ import re
 import subprocess
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from . import naming
+from . import __version__, naming
 from .paths import (
     MOVIE_LEVEL_DIRS,
     MOVIE_LEVEL_FILES,
@@ -25,12 +25,15 @@ from .paths import (
     episode_marker_any,
     is_generic_container,
     is_hidden_name,
+    is_organized_name,
     is_symlink,
     is_within,
     nfc,
     protected_root,
     normalize_title,
     multipart_token,
+    part_movie_number,
+    part_title_matches,
     read_entries,
     resolve_nfc,
     season_marker_any,
@@ -255,6 +258,56 @@ def _note_truncated(result: Dict[str, Any], opts: Dict[str, Any]) -> bool:
     return True
 
 
+def _warning_abs_path(base: str, rel: Optional[str],
+                      result: Dict[str, Any]) -> Optional[str]:
+    if not rel:
+        return None
+    if os.path.isabs(rel):
+        return os.path.normpath(rel)
+    kind = (result.get("input") or {}).get("kind")
+    anchor = os.path.dirname(base) if kind == "file" else base
+    return os.path.normpath(os.path.join(anchor, rel))
+
+
+def _public_warning(warning: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "code": warning.get("code") or "match.warning",
+        "detail": warning.get("detail") or "",
+        "file": warning.get("file"),
+    }
+
+
+def _warning_key(warning: Any) -> Tuple[Any, Any, Any]:
+    if isinstance(warning, dict):
+        return (warning.get("code"), warning.get("detail"), warning.get("file"))
+    return (str(warning), "", None)
+
+
+def _warning_matches_unit(unit: Dict[str, Any], warning: Dict[str, Any]) -> bool:
+    abs_path = warning.get("_abs")
+    rel = warning.get("file")
+    raw_paths = [f.get("raw_path") for f in (unit.get("files") or [])
+                 if f.get("raw_path")]
+    if abs_path:
+        abs_real = os.path.realpath(abs_path)
+        for raw in raw_paths:
+            if os.path.realpath(raw) == abs_real:
+                return True
+        for source in unit.get("source_paths") or []:
+            if os.path.realpath(source) == abs_real:
+                return True
+        source_root = unit.get("source_root")
+        if source_root and is_within(abs_path, source_root):
+            return True
+    if rel:
+        # Fall back to basename matching for older log/scan shapes where the
+        # warning file could not be resolved against the detection root.
+        rel_base = os.path.basename(rel)
+        if any(os.path.basename(raw) == rel_base for raw in raw_paths):
+            return True
+    return False
+
+
 def _detect_with_mode(
     runner: MediaDetectRunner,
     path: str,
@@ -267,6 +320,19 @@ def _detect_with_mode(
     except ScanError as exc:
         raise exc
     _note_truncated(result, opts)
+    if mode != "off":
+        detection = result.get("detection") or {}
+        for warning in detection.get("warnings") or []:
+            if not isinstance(warning, dict):
+                continue
+            # SPEC-004 G2: only match.year_conflict is a stable match warning
+            # in this scope. Do not absorb match.disabled/unavailable noise
+            # from the local detection pass.
+            if warning.get("code") != "match.year_conflict":
+                continue
+            item = _public_warning(warning)
+            item["_abs"] = _warning_abs_path(path, item.get("file"), result)
+            opts.setdefault("_match_warnings", []).append(item)
     return result
 
 
@@ -280,6 +346,61 @@ def _has_season_children(path: str) -> bool:
         except OSError:
             continue
     return False
+
+
+def _result_with_files(result: Dict[str, Any], files: List[Dict[str, Any]]) -> Dict[str, Any]:
+    updated = dict(result)
+    updated["files"] = files
+    return updated
+
+
+def _under_organized_entry(path: str, base: str) -> bool:
+    if is_organized_name(os.path.basename(path)):
+        return True
+    try:
+        rel = os.path.relpath(path, base)
+    except ValueError:
+        return False
+    parts = rel.split(os.sep)
+    return any(is_organized_name(part) for part in parts[:-1])
+
+
+def _first_organized_ancestor(path: str) -> Optional[str]:
+    current = os.path.abspath(path)
+    while True:
+        if is_organized_name(os.path.basename(current)):
+            return current
+        parent = os.path.dirname(current)
+        if parent == current:
+            return None
+        current = parent
+
+
+def _filter_organized_files(
+    files: List[Dict[str, Any]],
+    base: str,
+    opts: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """Drop files under an already-organized entry and record one skip each."""
+    if opts.get("include_organized"):
+        return files
+    kept: List[Dict[str, Any]] = []
+    for file_obj in files:
+        raw = file_obj.get("raw_path") or ""
+        if not raw or not _under_organized_entry(raw, base):
+            kept.append(file_obj)
+            continue
+        try:
+            rel = os.path.relpath(raw, base)
+        except ValueError:
+            rel = os.path.basename(raw)
+        skip_path = base
+        for part in rel.split(os.sep):
+            skip_path = os.path.join(skip_path, part)
+            if is_organized_name(part):
+                break
+        opts.setdefault("_skipped", []).append(_organized_skip(skip_path))
+    return kept
 
 
 def _under_movie_level_dir(path: str, base: str) -> bool:
@@ -455,6 +576,10 @@ def _skipped(path: str, code: str, reason: str) -> Dict[str, Any]:
     return {"path": path, "reason_code": code, "reason": reason}
 
 
+def _organized_skip(path: str) -> Dict[str, Any]:
+    return _skipped(path, "already_organized", "already organized")
+
+
 def _detect_error(result: Dict[str, Any], path: str, kind: str = "dir") -> Dict[str, Any]:
     error = result.get("error") or {}
     return _unplanned(path, kind, "no_match",
@@ -506,6 +631,22 @@ def _local_best(file_obj: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     }
 
 
+def _match_metadata(result: Dict[str, Any], file_obj: Dict[str, Any],
+                    best: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    match = file_obj.get("match") or result.get("match") or {}
+    top = result.get("match") or {}
+    status = match.get("status") or top.get("status") or "unmatched"
+    margin = match.get("margin")
+    if margin is None:
+        margin = top.get("margin")
+    return {
+        "match_status": status,
+        "match_margin": margin,
+        "match_score": (best or {}).get("score", 0),
+        "title_hit": bool((best or {}).get("title_hit", False)),
+    }
+
+
 def _movie_best_for_group(
     result: Dict[str, Any], group: List[Dict[str, Any]]
 ) -> Optional[Dict[str, Any]]:
@@ -533,7 +674,11 @@ def _positive_single_movie_dir(
     features = [f for f in files if _is_feature(f)]
     if len(features) != 1:
         return False
-    if multipart_token(os.path.basename(features[0].get("raw_path") or "")):
+    feature_name = os.path.basename(features[0].get("raw_path") or "")
+    if multipart_token(feature_name, allow_part=True):
+        return False
+    part = part_movie_number(feature_name)
+    if part is not None and not part_title_matches(part, best):
         return False
     if any(_is_tv(f) for f in files):
         return False
@@ -666,7 +811,7 @@ def _scan_movie_file(
     opts: Dict[str, Any],
 ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     name = _safe_name(path)
-    if multipart_token(name):
+    if multipart_token(name, allow_part=True):
         return None, _unplanned(path, "movie", "unsupported_multipart",
                                 "multipart token in movie filename")
     match = file_obj.get("match") or result.get("match") or {}
@@ -680,12 +825,18 @@ def _scan_movie_file(
         return None, _unplanned(path, "movie", "no_match", "no usable TMDB match")
     if match.get("status") == "unmatched":
         warnings.append("weak_match")
+    part = part_movie_number(name)
+    if part is not None and not part_title_matches(part, best):
+        return None, _unplanned(
+            path, "movie", "unsupported_multipart",
+            "Part %d is not proven by the TMDB title" % part)
+    meta = _match_metadata(result, file_obj, best)
     parent = os.path.dirname(path)
     if is_generic_container(_safe_name(parent)):
         return {
             "kind": "movie", "input_kind": "file", "source_paths": [path],
             "root": parent, "files": [file_obj], "best": best,
-            "context": {"mode": "file"}, "warnings": warnings,
+            "context": {"mode": "file"}, "warnings": warnings, **meta,
         }, None
     try:
         parent_result = runner.detect(parent, match=opts.get("match", "auto"),
@@ -698,12 +849,12 @@ def _scan_movie_file(
         return {
             "kind": "movie", "input_kind": "directory", "source_root": parent,
             "root": os.path.dirname(parent), "files": [file_obj], "best": best,
-            "context": {"mode": "directory"}, "warnings": warnings,
+            "context": {"mode": "directory"}, "warnings": warnings, **meta,
         }, None
     return {
         "kind": "movie", "input_kind": "file", "source_paths": [path],
         "root": parent, "files": [file_obj], "best": best,
-        "context": {"mode": "file"}, "warnings": warnings,
+        "context": {"mode": "file"}, "warnings": warnings, **meta,
     }, None
 
 
@@ -714,7 +865,7 @@ def _split_multipart_movies(
     safe = []
     for file_obj in files:
         path = file_obj.get("raw_path") or file_obj.get("name") or ""
-        if multipart_token(os.path.basename(path)):
+        if multipart_token(os.path.basename(path), allow_part=True):
             unplanned.append(_unplanned(
                 path, "movie", "unsupported_multipart",
                 "multipart token in movie filename"))
@@ -735,7 +886,7 @@ def _detect_movie_file_objects(
         path = file_obj.get("raw_path")
         if not path:
             continue
-        if multipart_token(os.path.basename(path)):
+        if multipart_token(os.path.basename(path), allow_part=True):
             errors.append(_unplanned(path, "movie", "unsupported_multipart",
                                      "multipart token in movie filename"))
             continue
@@ -786,11 +937,13 @@ def _movie_units_from_result(
                 "kind": "movie", "input_kind": "directory", "source_root": base,
                 "root": os.path.dirname(base), "files": movie_files, "best": best,
                 "context": {"mode": "directory"}, "warnings": [],
+                **_match_metadata(result, movie_files[0], best),
             })
             return units, unplanned
     targets_seen: Dict[str, str] = {}
     for key, group in groups.items():
-        if any(multipart_token(os.path.basename(f["raw_path"])) for f in group):
+        if any(multipart_token(os.path.basename(f["raw_path"]), allow_part=True)
+               for f in group):
             for f in group:
                 unplanned.append(_unplanned(f["raw_path"], "movie", "unsupported_multipart",
                                             "multipart token in movie filename"))
@@ -801,6 +954,19 @@ def _movie_units_from_result(
                 unplanned.append(_unplanned(f["raw_path"], "movie", "no_match",
                                             "no usable TMDB match"))
             continue
+        part_numbers = {
+            number for number in (
+                part_movie_number(os.path.basename(f["raw_path"])) for f in group
+            ) if number is not None
+        }
+        if part_numbers:
+            if (len(part_numbers) != 1
+                    or not part_title_matches(next(iter(part_numbers)), best)):
+                for f in group:
+                    unplanned.append(_unplanned(
+                        f["raw_path"], "movie", "unsupported_multipart",
+                        "Part N is not proven by the TMDB title"))
+                continue
         try:
             target = naming.movie_target(best)
         except naming.NamingError as exc:
@@ -818,6 +984,7 @@ def _movie_units_from_result(
             "source_paths": [f["raw_path"] for f in group],
             "root": root, "files": group, "best": best,
             "context": {"mode": "files", "target_hint": target}, "warnings": [],
+            **_match_metadata(result, group[0], best),
         })
     return units, unplanned
 
@@ -987,6 +1154,9 @@ def _classify_dir(
     files, errors = _resolve_files(result, path)
     files = [f for f in files
              if not _under_movie_level_dir(f.get("raw_path") or "", path)]
+    if not opts.get("include_organized"):
+        files = [f for f in files
+                 if not _under_organized_entry(f.get("raw_path") or "", path)]
     if errors:
         # A single library unit is all-or-nothing: never plan a partial tree.
         return [], list(errors), skipped, warnings
@@ -994,6 +1164,7 @@ def _classify_dir(
         warnings.append({"code": "scan.truncated", "detail": "--max-files reached"})
         return [], unplanned, skipped, warnings
     files = _split_unsafe_multi(files, "tv", unplanned)
+    result = _result_with_files(result, files)
 
     season_hint = season_marker_whole(_safe_name(path))
     parent = os.path.dirname(path)
@@ -1036,9 +1207,17 @@ def _classify_dir(
     entries = read_entries(path)
     dirs = []
     direct_files = []
+    visible = 0
     for entry in entries:
         try:
-            if is_hidden_name(entry.name) or entry.is_symlink():
+            if is_hidden_name(entry.name):
+                continue
+            visible += 1
+            if entry.is_symlink():
+                continue
+            if (not opts.get("include_organized")
+                    and is_organized_name(entry.name)):
+                skipped.append(_organized_skip(entry.path))
                 continue
             if entry.is_dir(follow_symlinks=False):
                 dirs.append(entry.path)
@@ -1046,6 +1225,8 @@ def _classify_dir(
                 direct_files.append(entry.path)
         except OSError:
             continue
+    if visible and not dirs and not direct_files:
+        return units, unplanned, skipped, warnings
 
     season_dirs = [d for d in dirs if season_marker_whole(_safe_name(d)) is not None]
     direct_media = [p for p in direct_files
@@ -1238,6 +1419,11 @@ def _scan_direct_file(
     opts: Dict[str, Any],
     root_override: Optional[str] = None,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    if not opts.get("include_organized"):
+        organized = _first_organized_ancestor(path)
+        if organized:
+            opts.setdefault("_skipped", []).append(_organized_skip(organized))
+            return None, None
     try:
         result = _detect_with_mode(runner, path, opts, "off")
     except ScanError as exc:
@@ -1260,7 +1446,7 @@ def _scan_direct_file(
             unit["root"] = root_override
         return unit, bad
     if _is_feature(file_obj):
-        if multipart_token(name):
+        if multipart_token(name, allow_part=True):
             return None, _unplanned(path, "movie", "unsupported_multipart",
                                     "multipart token in movie filename")
         movie_result = result
@@ -1291,6 +1477,7 @@ def scan_path(
     max_files: int = 5000,
     session_id: Optional[str] = None,
     session_token: Optional[str] = None,
+    include_organized: bool = False,
 ) -> Dict[str, Any]:
     from .session import ensure_session
 
@@ -1299,14 +1486,45 @@ def scan_path(
         raise ScanError("E_INPUT_MISSING", "input path does not exist: %s" % path)
     if is_symlink(path):
         raise ScanError("E_INPUT_SYMLINK", "input root is a symlink: %s" % path)
-    runner = MediaDetectRunner(md_bin)
-    version = runner.version()
 
     explicit_root = os.path.abspath(root) if root else None
     if explicit_root and not os.path.isdir(explicit_root):
         raise ScanError("E_INPUT_MISSING", "root does not exist: %s" % explicit_root)
 
-    opts = {"probe": probe, "max_files": max_files, "match": match}
+    if not include_organized and is_organized_name(os.path.basename(path.rstrip(os.sep))):
+        final_root = explicit_root or (path if os.path.isdir(path) else os.path.dirname(path))
+        if not is_within(path, final_root):
+            raise ScanError("E_OUTSIDE_ROOT", "input is outside --root: %s" % path)
+        if protected_root(final_root):
+            raise ScanError("E_PROTECTED_ROOT", "refusing protected root: %s" % final_root)
+        session = ensure_session(final_root, session_id, session_token)
+        return {
+            "schema_version": "1",
+            "session_id": session["session_id"],
+            "session_token": session["session_token"],
+            "state_dir": session["state_dir"],
+            "generated_at": utc_now(),
+            "tool_version": __version__,
+            "input": {"path": path, "kind": "file" if os.path.isfile(path) else "directory"},
+            "root": final_root,
+            "mode": "single" if (os.path.isfile(path) or mode == "single") else "library",
+            "mode_reason": "already_organized",
+            "options": {"match_mode": match, "probe_mode": probe,
+                        "max_files": max_files,
+                        "include_organized": include_organized},
+            "md_version": None,
+            "units": [],
+            "unplanned": [],
+            "skipped": [_organized_skip(path)],
+            "errors": [],
+            "warnings": [],
+        }
+
+    runner = MediaDetectRunner(md_bin)
+    version = runner.version()
+
+    opts = {"probe": probe, "max_files": max_files, "match": match,
+            "include_organized": include_organized}
     units: List[Dict[str, Any]] = []
     unplanned: List[Dict[str, Any]] = []
     skipped: List[Dict[str, Any]] = []
@@ -1342,11 +1560,46 @@ def scan_path(
             if reason == "library":
                 units, unplanned, skipped, warnings = _classify_dir(path, runner, opts)
                 mode_reason = "library"
+            elif reason == "all_organized":
+                mode_reason = "library"
             else:
                 mode_reason = reason
 
+    match_warnings = opts.get("_match_warnings") or []
+    for unit in units:
+        unit_warnings = list(unit.get("warnings") or [])
+        unit_keys = {_warning_key(warning) for warning in unit_warnings}
+        for warning in match_warnings:
+            if not _warning_matches_unit(unit, warning):
+                continue
+            item = _public_warning(warning)
+            key = _warning_key(item)
+            if key in unit_keys:
+                continue
+            unit_warnings.append(item)
+            unit_keys.add(key)
+        unit["warnings"] = unit_warnings
     warnings.extend(opts.get("_warnings") or [])
+    warnings.extend(_public_warning(warning) for warning in match_warnings)
+    for unit in units:
+        normalized = []
+        for warning in unit.get("warnings") or []:
+            if isinstance(warning, dict):
+                normalized.append(warning)
+            else:
+                normalized.append({"code": str(warning), "detail": "", "file": None})
+        unit["warnings"] = normalized
     unplanned.extend(opts.get("_unplanned") or [])
+    skipped.extend(opts.get("_skipped") or [])
+    seen_skipped = set()
+    unique_skipped = []
+    for item in skipped:
+        path_key = item.get("path")
+        if path_key in seen_skipped:
+            continue
+        seen_skipped.add(path_key)
+        unique_skipped.append(item)
+    skipped = unique_skipped
     seen_unplanned = set()
     unique_unplanned = []
     for item in unplanned:
@@ -1359,7 +1612,8 @@ def scan_path(
     seen_warnings = set()
     unique_warnings = []
     for item in warnings:
-        key = (item.get("code"), item.get("detail")) if isinstance(item, dict) else (str(item), "")
+        key = ((item.get("code"), item.get("detail"), item.get("file"))
+               if isinstance(item, dict) else (str(item), "", None))
         if key in seen_warnings:
             continue
         seen_warnings.add(key)
@@ -1407,12 +1661,13 @@ def scan_path(
         "session_token": session["session_token"],
         "state_dir": session["state_dir"],
         "generated_at": utc_now(),
-        "tool_version": "0.1.0",
+        "tool_version": __version__,
         "input": {"path": path, "kind": "file" if os.path.isfile(path) else "directory"},
         "root": final_root,
         "mode": mode_reason,
         "mode_reason": mode_reason,
-        "options": {"match_mode": match, "probe_mode": probe, "max_files": max_files},
+        "options": {"match_mode": match, "probe_mode": probe, "max_files": max_files,
+                    "include_organized": include_organized},
         "md_version": version,
         "units": units,
         "unplanned": unplanned,
@@ -1428,6 +1683,11 @@ def _scan_single_dir(
     runner: MediaDetectRunner,
     opts: Dict[str, Any],
 ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    if not opts.get("include_organized"):
+        organized = _first_organized_ancestor(path)
+        if organized:
+            opts.setdefault("_skipped", []).append(_organized_skip(organized))
+            return None, None
     result = _detect_with_mode(runner, path, opts, "off")
     if result.get("ok") is False:
         return None, _detect_error(result, path)
@@ -1439,6 +1699,10 @@ def _scan_single_dir(
         files, errors = _resolve_files(result, path)
         if errors:
             return None, errors[0]
+        all_files = files
+        files = _filter_organized_files(files, path, opts)
+        if not files and all_files:
+            return None, None
         unsafe: List[Dict[str, Any]] = []
         files = _split_unsafe_multi(files, "tv", unsafe)
         if unsafe:
@@ -1499,13 +1763,19 @@ def _scan_single_dir(
     file_objects = None
     allow_directory_unit = True
     movie_errors: List[Dict[str, Any]] = []
+    resolved, resolve_errors = _resolve_files(result, path)
+    if resolve_errors:
+        return None, resolve_errors[0]
+    filtered = _filter_organized_files(resolved, path, opts)
+    organized_filtered = len(filtered) != len(resolved)
+    if organized_filtered and not any(_is_feature(f) for f in filtered):
+        return None, None
     if opts.get("match", "auto") != "off":
-        resolved, _errors = _resolve_files(result, path)
         unsafe_movies: List[Dict[str, Any]] = []
-        safe_movies = _split_unsafe_multi(resolved, "movie", unsafe_movies)
+        safe_movies = _split_unsafe_multi(filtered, "movie", unsafe_movies)
         multipart_movies: List[Dict[str, Any]] = []
         safe_movies = _split_multipart_movies(safe_movies, multipart_movies)
-        if unsafe_movies or multipart_movies:
+        if unsafe_movies or multipart_movies or organized_filtered:
             opts.setdefault("_unplanned", []).extend(unsafe_movies)
             opts["_unplanned"].extend(multipart_movies)
             file_objects, movie_errors = _detect_movie_file_objects(
@@ -1516,6 +1786,11 @@ def _scan_single_dir(
                 movie_result = _detect_with_mode(runner, path, opts, opts["match"])
             except ScanError as exc:
                 return None, _unplanned(path, "movie", "no_match", exc.message)
+    elif organized_filtered:
+        # --match=off still must not move an already-organized entry, and it
+        # must not rename the directory that contains it.
+        file_objects = filtered
+        allow_directory_unit = False
     units, bad = _movie_units_from_result(
         movie_result, path, os.path.dirname(path), runner, opts,
         allow_directory_unit=allow_directory_unit, file_objects=file_objects)
@@ -1539,19 +1814,19 @@ def _auto_dir(
     if season is not None:
         unit, bad = _scan_single_dir(path, runner, opts)
         return unit, bad, "single"
-    result = _detect_with_mode(runner, path, opts, "off")
-    if result.get("ok") is False:
-        return None, _detect_error(result, path), "single"
-    files, errors = _resolve_files(result, path)
-    files = [f for f in files
-             if not _under_movie_level_dir(f.get("raw_path") or "", path)]
-    if errors:
-        return None, errors[0], "single"
-    unsafe: List[Dict[str, Any]] = []
-    files = _split_unsafe_multi(files, "file", unsafe)
-    if unsafe:
-        opts.setdefault("_unplanned", []).extend(unsafe)
-    entries = [e for e in read_entries(path) if not is_hidden_name(e.name)]
+    all_entries = [e for e in read_entries(path) if not is_hidden_name(e.name)]
+    entries = []
+    organized_skips = []
+    for entry in all_entries:
+        if (not opts.get("include_organized")
+                and is_organized_name(entry.name)):
+            organized_skips.append(_organized_skip(entry.path))
+            continue
+        entries.append(entry)
+    if organized_skips:
+        opts.setdefault("_skipped", []).extend(organized_skips)
+    if all_entries and not entries:
+        return None, None, "all_organized"
     dirs = [e.path for e in entries if e.is_dir(follow_symlinks=False)]
     direct_files = [e.path for e in entries if e.is_file(follow_symlinks=False)]
     meaningful_dirs = [
@@ -1559,6 +1834,22 @@ def _auto_dir(
     ]
     if meaningful_dirs:
         return None, None, "library"
+    result = _detect_with_mode(runner, path, opts, "off")
+    if result.get("ok") is False:
+        return None, _detect_error(result, path), "single"
+    files, errors = _resolve_files(result, path)
+    files = [f for f in files
+             if not _under_movie_level_dir(f.get("raw_path") or "", path)]
+    if not opts.get("include_organized"):
+        files = [f for f in files
+                 if not _under_organized_entry(f.get("raw_path") or "", path)]
+    if errors:
+        return None, errors[0], "single"
+    unsafe: List[Dict[str, Any]] = []
+    files = _split_unsafe_multi(files, "file", unsafe)
+    if unsafe:
+        opts.setdefault("_unplanned", []).extend(unsafe)
+    result = _result_with_files(result, files)
     tv_files = [f for f in files if _is_tv(f)]
     movie_files = [f for f in files if _is_feature(f)]
     multipart_bad: List[Dict[str, Any]] = []

@@ -5,7 +5,7 @@ owner: alang
 depends_on:
   - docs/specs/SPEC-001-media-type-detection/spec.md
   - docs/specs/SPEC-002-package-boundary/spec.md
-updated_at: 2026-11-12
+updated_at: 2026-11-14
 ---
 
 # media-title 智能体技能技术方案
@@ -16,7 +16,7 @@ updated_at: 2026-11-12
 | 主笔 | alang |
 | 评审人 | alang（维护者兼技能使用者）；架构评审与对抗性评审（独立智能体） |
 | 创建日期 | 2026-11-12 |
-| 目标版本 | media-title v0.1.0（技能包）；MediaDetect v0.2.1（含多集解析修复） |
+| 目标版本 | media-title v0.1.1（技能包）；MediaDetect v0.2.2（当前发布；G6 历史发布为 v0.2.1） |
 | 关联资源 | `scripts/mediadetect-title.sh`；MediaDetect CLI/JSON schema `"1"`；TMDB API；`skills/media-title/`；Agent Skills `SKILL.md` 规范 |
 
 ## 1. 背景与上下文
@@ -67,7 +67,7 @@ MediaDetect 当前对剧集提供本地识别：`tv_episode`、`tv_season`、`tv
 * **计划先行**：任何文件改动之前先生成完整计划，默认不执行；用户逐项确认后才动文件系统。
 * **电影走 TMDB，剧集走本地识别**：v1 不为剧集引入联网匹配，保证结果可复现、无额外密钥和限流问题。
 * **通用技能包**：按 Agent Skills 的 `SKILL.md` 规范组织，不绑定 Claude Code，可被复制或挂载到任意支持该规范的智能体。
-* **安全边界可验证**：不覆盖、不删除非空目录、原子 no-replace 移动、按 session 隔离状态、计划内容哈希、`--expect-plan-id` 绑定确认、JSONL 指纹日志。
+* **安全边界可验证**：不覆盖、不删除非空目录、**默认原子 no-replace 移动**、按 session 隔离状态、计划内容哈希、`--expect-plan-id` 绑定确认、JSONL 指纹日志。仅当用户显式 opt-in（`--no-replace=check` 或 `MEDIA_TITLE_ALLOW_CHECK_RENAME=1`）时，才允许在 SMB 等不支持原子 no-replace 的文件系统上降级为**非原子 check-then-rename**；该模式必须在结果与日志中显式告警。
 * **歧义一律 unplanned**：通用下载目录、多剧混放、多分部、季号未知且无上下文、歧义根模式、无法唯一映射的路径，都不猜；输出 `unplanned` 和明确原因，由用户手工处理或显式指定模式。
 
 ### 1.4 非目标
@@ -87,11 +87,15 @@ MediaDetect 当前对剧集提供本地识别：`tv_episode`、`tv_season`、`tv
 ### 2.1 目标
 
 * **G1 - 技能交付：通用 Agent Skill 包**：在 `skills/media-title/` 提供 `SKILL.md`、确定性辅助脚本、参考文档和计划 schema；技能可被复制或挂载到支持 Agent Skills 的智能体。验收：`SKILL.md` frontmatter 含 `name: media-title` 与可触发描述；包内无 Claude Code 专有依赖；`python3 -m py_compile` 通过；按 `SKILL.md` 的步骤可在临时目录完成一次扫描、计划、确认、执行、回滚闭环。
-* **G2 - 电影整理**：对单电影文件、单电影目录、多电影目录分别生成计划；名称沿用 `scripts/mediadetect-title.sh` 的格式 `title original_title (year) {imdb_id}`，`original_title` 缺失或与 `title` 相同则省略，`imdb_id` 缺失时用 `{tmdb<id>}`，年份缺失时省略年份段。验收：测试覆盖 high/medium/low/unmatched/disabled/unavailable/multiple；只跳过形如 `{tt...}`/`{tmdb...}` 的已整理目录；多电影目录按电影拆分而不是把整个目录改成其中一部；同名字幕、NFO、封面随视频移动；多分部/多版本无法唯一归组时标记 `unplanned/unsupported_multipart`，既不猜也不拆成多个电影目录；单文件父目录只有通过“单电影目录”正面校验（4.3.1.1）时才整体重命名，否则按文件单元处理，避免把 `Downloads` 等通用容器当电影目录；已整理目录内的电影文件不重复套层。
+* **G2 - 电影整理**：对单电影文件、单电影目录、多电影目录分别生成计划；名称沿用 `scripts/mediadetect-title.sh` 的格式 `title original_title (year) {imdb_id}`，`original_title` 缺失或与 `title` 相同则省略，`imdb_id` 缺失时用 `{tmdb<id>}`，年份缺失时省略年份段。验收：测试覆盖 high/medium/low/unmatched/disabled/unavailable/multiple；只跳过形如 `{tt...}`/`{tmdb...}` 的已整理目录；多电影目录按电影拆分而不是把整个目录改成其中一部；同名字幕、NFO、封面随视频移动；多分部/多版本无法唯一归组时标记 `unplanned/unsupported_multipart`，既不猜也不拆成多个电影目录（`Part N` 独立电影例外见 4.4.2.1）；单文件父目录只有通过“单电影目录”正面校验（4.3.1.1）时才整体重命名，否则按文件单元处理，避免把 `Downloads` 等通用容器当电影目录；已整理目录内的电影文件不重复套层。
 * **G3 - 剧集整理**：使用 MediaDetect 本地识别生成 `剧名 (年份)/Season NN/` 结构；年份未知时省略年份；默认保留剧集原文件名，`--rename-episodes` 时按 `剧名 - SxxExx[ - 集标题].ext` 重命名；CJK `第 N 集`、单集文件、多剧库根、多集写法有明确降级规则。验收：覆盖 `tv_episode` 单文件、`tv_season`、`tv_series`、扁平 `Some.Show.S01...` 目录、多剧库根、已规范目录、季号缺失、CJK 与 SxxExx 混放；剧集不发起 TMDB 请求；通用下载目录散落文件、同名不同年份、多剧混放、无法确定剧名时 `unplanned`，不猜；`plan.json` 必须逐条列出 unplanned 条目及原因，不能只给计数。
-* **G4 - 计划、执行与回滚安全**：扫描/计划阶段不修改媒体文件；执行前一次性预检全部选中单元；任何冲突使整个选择中止；移动使用 no-replace 原子操作；每个操作（含 `mkdir`/`remove_empty_dir`）执行前写 intent 快照、成功后写 done；按 unit 记录 `pending/applying/applied/failed/rolled_back`；`rollback` 与 `apply` 共用 session 锁，可以从日志派生已完成 unit，逆序、可重复地恢复；目录移动记录递归子树指纹，回滚时防止带走执行后新增的嵌套文件。验收：媒体树元数据指纹（排除 `.media-title`）在 `scan`/`plan` 前后不变；`apply`/`rollback` 必须带正确的 `--expect-plan-id`；目标已存在、跨设备、越界路径、符号链接、大小写/Unicode 冲突、计划哈希不符、源状态变化均被拦截；move 与日志之间的崩溃可由 intent 对账恢复；共享 mkdir 可跨 unit 表达；同一计划重复 `apply` 不重复移动；`rollback` 执行两次是幂等的。
+* **G4 - 计划、执行与回滚安全**：扫描/计划阶段不修改媒体文件；执行前一次性预检全部选中单元；任何冲突使整个选择中止；移动默认使用 no-replace 原子操作（仅 G7 显式 opt-in 的 `check` 模式例外）；每个操作（含 `mkdir`/`remove_empty_dir`）执行前写 intent 快照、成功后写 done；按 unit 记录 `pending/applying/applied/failed/rolled_back`；`rollback` 与 `apply` 共用 session 锁，可以从日志派生已完成 unit，逆序、可重复地恢复；目录移动记录递归子树指纹，回滚时防止带走执行后新增的嵌套文件。验收：媒体树元数据指纹（排除 `.media-title`）在 `scan`/`plan` 前后不变；`apply`/`rollback` 必须带正确的 `--expect-plan-id`；目标已存在、跨设备、越界路径、符号链接、大小写/Unicode 冲突、计划哈希不符、源状态变化均被拦截；move 与日志之间的崩溃可由 intent 对账恢复；共享 mkdir 可跨 unit 表达；同一计划重复 `apply` 不重复移动；`rollback` 执行两次是幂等的。
 * **G5 - 可测试、可移植、可维护**：辅助脚本只依赖 Python 3.9+ 标准库；不新增第三方 Python/Go 依赖；macOS 与 Linux 可用；路径包含空格、引号、中文、Unicode 组合字符时可正确处理；核心文件系统操作可注入/可 mock。验收：`python3 -m unittest discover -s skills/media-title/tests` 全绿；CI 在 `ubuntu-latest` 与 `macos-latest` 运行该测试；现有 Go 测试不受影响；`git diff` 中不出现新增依赖；no-replace 能力探测失败时有明确拒绝路径。
-* **G6 - MediaDetect 多集解析与标题清理修复**：`parser` 识别连续多集写法 `S01E01E02`、`S01E01E02E03`，输出 `SeasonEpisode = "S01E01-E02"` / `"S01E01-E03"`，使其按 `tv_episode` 分类且不参与 TMDB 电影匹配；这里的“连续”必须是**集号数值连续**（`n, n+1, ...`，至少两段、无跳号），不是仅相邻的 `E` 段。同时修正 `mapping.go` 的 `displayTitles`/`stripEpisode`，确保 `title_candidates` 不再残留 `E02` 或 `E02E03`。验收：新增 parser/detect 测试；`Show.S01E01E02.mkv` 与 `Show.S01E01E02E03.mkv` 均为 `media_type=tv_episode`、`match.status=not_applicable`，且 `title_candidates` 均为 `["Show"]`；`S01E01-E02` 现有行为不变；非连续写法（如 `S01E01E03`、`S01E01E02E04`）仍不被误解析，由技能层对所有 `media_type` 标记 `unsupported_multi_episode`；`defaultVersion`、README、SPEC-001 已知限制、SPEC-002 版本口径与 `cmd/mediadetect/main_test.go` 的版本断言同步为 `v0.2.1`；其余 MediaDetect 测试全部通过。
+* **G6 - MediaDetect 多集解析与标题清理修复**：`parser` 识别连续多集写法 `S01E01E02`、`S01E01E02E03`，输出 `SeasonEpisode = "S01E01-E02"` / `"S01E01-E03"`，使其按 `tv_episode` 分类且不参与 TMDB 电影匹配；这里的“连续”必须是**集号数值连续**（`n, n+1, ...`，至少两段、无跳号），不是仅相邻的 `E` 段。同时修正 `mapping.go` 的 `displayTitles`/`stripEpisode`，确保 `title_candidates` 不再残留 `E02` 或 `E02E03`。验收：新增 parser/detect 测试；`Show.S01E01E02.mkv` 与 `Show.S01E01E02E03.mkv` 均为 `media_type=tv_episode`、`match.status=not_applicable`，且 `title_candidates` 均为 `["Show"]`；`S01E01-E02` 现有行为不变；非连续写法（如 `S01E01E03`、`S01E01E02E04`）仍不被误解析，由技能层对所有 `media_type` 标记 `unsupported_multi_episode`；`defaultVersion`、README、SPEC-001 已知限制、SPEC-002 版本口径与 `cmd/mediadetect/main_test.go` 的版本断言同步为 `v0.2.1`（G6 历史发布；当前 `v0.2.2` 由 SPEC-004 T5 更新）；其余 MediaDetect 测试全部通过。
+* **G7 - 可选的文件系统降级移动**：为 SMB/NFS 等不支持原子 no-replace、也不支持硬链接的文件系统提供显式 opt-in 的 `check-then-rename` 降级；默认仍严格拒绝。验收：默认模式下 `renameat2`/`renamex_np` 与 `link+unlink` 都不可用时返回 `E_NO_REPLACE_UNSUPPORTED`，零媒体改动；显式 `--no-replace=check` 或 `MEDIA_TITLE_ALLOW_CHECK_RENAME=1` 时，目标存在仍返回 `E_TARGET_EXISTS`，绝不覆盖，移动成功后校验 size/mtime（目录为 mtime + 可移植子树指纹），结果含 `warning: non_atomic_move`，日志记录 `move_method=check_then_rename`/`atomic=false`；rollback 对这类日志必须使用同一 opt-in 和可移植指纹，未 opt-in 时拒绝执行且零改动。
+* **G8 - 扫描阶段跳过已整理条目**：`scan` 在进入任何目录/文件并调用 MediaDetect 之前，先按名称识别已整理条目（`{tt...}`/`{tmdb...}`），命中则写入 `skipped/already_organized`，不调用 MediaDetect、不向下遍历；默认开启，`--include-organized` 可强制重新检测。验收：包含 N 个已整理目录的根扫描中，MediaDetect 调用次数不随 N 增长；`skipped[]` 逐条列出路径与 `already_organized`；开启开关后行为与旧版本一致；文件与目录都适用；媒体文件零改动。
+* **G9 - 匹配诊断、端到端置信度门控与 SMB 指引**：`scan` 单元必须保存 MediaDetect 的文件级 `match.status`/`margin`/`score`/`title_hit`；`plan` 的 `match_status` 取文件级 status 与 score 推导 status 的较低者，绝不提升。`low`/`unmatched`/`score<0.6`/`title_hit=false` 的单元进入 `unplanned/low_confidence`，不生成任何 move；`disabled`/`unavailable` 的本地降级命名例外；medium 且 `title_hit=true` 可 planned，但必须显示 warning；high 才能默认排在前面。MediaDetect 的 `match.year_conflict` 原样带入 unit/plan `warnings` 并在人类输出显示。`E_NO_REPLACE_UNSUPPORTED` 错误消息必须提示 SMB/NFS 用户可在确认后使用 `--no-replace=check`（apply 与 rollback 同时），不得自动启用。验收：A1/A2 在 plan 中不再是 planned medium/high；mock warning → scan/plan/human 可见；默认 strict 下错误消息含提示；不新增网络/文件系统探测。
+* **G10 - SMB mtime 改写兼容**：`check_then_rename` 在 rename 后先按内容指纹校验（文件 size；目录相对路径+类型+size，不含 mtime/dev/ino）；一致后尝试 `os.utime` 恢复原 mtime。恢复成功 validation=`size_mtime`；恢复失败但内容指纹一致时允许成功，validation=`size_content`，warning `mtime_rewritten`。内容指纹不一致仍失败并保留现场。rollback 反向移动使用同一策略，并尽力恢复到 `from_state.mtime_ns`；默认 strict 行为不变。验收：mock rename 改写 mtime 时 apply/rollback 成功且 warning 可见；size/内容指纹不一致仍失败。
 
 ### 2.2 非目标
 
@@ -220,7 +224,7 @@ skills/media-title/
 name: media-title
 description: Organize local movie and TV directories with MediaDetect. Use when the user asks to rename, sort, or clean up downloaded movies or shows, or to apply a consistent library naming scheme.
 metadata:
-  version: 0.1.0
+  version: 0.1.1
 ---
 ```
 
@@ -250,6 +254,7 @@ python3 scripts/media_title.py rollback --plan <plan.json> --expect-plan-id <id>
 | `--max-files` | `5000` | 透传 MediaDetect；达到上限时 `detection.truncated=true` |
 | `--json` | 关闭 | 结果以 JSON 输出到 stdout；默认输出人类可读摘要 |
 | `--out <path>` | — | **仅导出副本**；`scan`/`plan` 仍写 session 文件；`plan --out` 不改变“一 session 一 plan”约束 |
+| `--include-organized` | 关闭 | `scan` 专用；默认对名称含 `{tt...}`/`{tmdb...}` 的目录或文件直接 `skipped/already_organized`，不调用 MediaDetect、不向下遍历；开启后强制检测 |
 
 `plan` 选项：
 
@@ -266,6 +271,7 @@ python3 scripts/media_title.py rollback --plan <plan.json> --expect-plan-id <id>
 | `--select` | **必填** | `all` 或逗号分隔的 unit ID，例如 `u1,u3`；不接受序号 |
 | `--yes` | **必填** | 明确确认执行；缺少时返回 `E_USAGE`，脚本不做交互式提问 |
 | `--retry-failed` | 关闭 | 仅重试 `failed` 或对账后仍不完整的 `applying` 单元；未提供时这些单元返回 `E_UNIT_STATE_CONFLICT` |
+| `--no-replace strict\|check` | `strict` | `strict` 只允许平台级 no-replace 或 `link+unlink`；`check` 允许在不支持前两者的文件系统上降级为非原子 check-then-rename。等价环境变量 `MEDIA_TITLE_ALLOW_CHECK_RENAME=1`；CLI 优先于环境变量。`check` 必须由用户显式开启 |
 
 `rollback` 选项：
 
@@ -273,6 +279,7 @@ python3 scripts/media_title.py rollback --plan <plan.json> --expect-plan-id <id>
 | --- | --- | --- |
 | `--expect-plan-id` | **必填** | 用户确认时看到的 `plan_id`；与计划文件或 `state.json` 不一致时 `E_EXPECT_PLAN_MISMATCH` |
 | `--session-dir <path>` | — | 当 `plan.json` 被替换/删除/移动时，直接指定 session 目录；必须与 `--expect-plan-id`、`state.json`、`applied-plan.json` 一致 |
+| `--no-replace strict\|check` | `strict` | 与 `apply` 相同。若 apply 日志中存在 `move_method=check_then_rename` 的条目，`rollback` 必须在 `check` 下执行；未显式开启时返回 `E_NO_REPLACE_UNSUPPORTED`，零改动 |
 | `--select` | 从 `apply.log.jsonl` 派生有日志条目的单元（`applying`/`applied`/`failed`） | `all` 或 unit ID；只回滚选中单元 |
 | `--yes` | **必填** | 缺少时返回 `E_USAGE` |
 
@@ -425,9 +432,25 @@ MediaDetect 的 `files[].path` 是 NFC 归一化的相对路径，真实文件�
 * 目标路径与源路径相同：用 `os.path.samefile`（两者都存在时）或规范化 `realpath` 比较，不用字符串相等。
 * 第二次运行同一输入、同一 session 时，计划中 `planned` 单元数必须为 0；否则视为幂等性缺陷。
 
+##### 4.3.5.1 扫描阶段提前跳过
+
+* 扫描遍历在进入任何目录/文件、调用 MediaDetect 之前，先用共享正则 `\{(?:tt\d+|tmdb\d+)\}`（大小写不敏感）检查 basename；命中即记录 `skipped[]`：
+  ```json
+  {"path": "...", "reason_code": "already_organized", "reason": "already organized"}
+  ```
+* 命中条目不产生 unit、不进入 `unplanned`、不递归遍历其子项；`skipped[]` 只列顶层命中路径，不展开 season/sidecar。
+* 规则同时适用于目录输入、文件输入和库根的直接子项；输入路径本身命中时也跳过，不调用 MediaDetect。
+* 默认开启；`--include-organized` 关闭该短路，恢复旧行为（正常检测/递归）。该开关是强制重扫已整理条目的唯一方式。
+* 只看名称，不做内容或 TMDB ID 校验；用户保留 `{tt...}`/`{tmdb...}` 即视为显式已整理信号。其他花括号内容不命中。
+* 扫描阶段仍按原规则在 `--root` 下创建 session；跳过条目不改变 session 位置或媒体树。
+* plan 阶段的 `_already_organized_movie` 继续保留，作为扫描未跳过时的第二道防线；两处必须使用同一正则/辅助函数，避免漂移。
+
 #### 4.3.6 失败与部分结果
 
 * 单个单元检测失败不终止整次扫描；`errors[]` 记录单元路径、MediaDetect 退出码和错误消息，其他单元继续。
+* MediaDetect 返回的 `match.year_conflict` 必须原样透传到 unit `warnings`，并由 plan 汇总到 `plan.warnings`；warning 统一为对象 `{code, detail, file}`（现有字符串 warning 迁移为同结构），按 `(code, detail, file)` 去重。人类输出逐条显示匹配 warning。
+* movie unit 必须保存 `match_status`、`match_margin`、`match_score`、`title_hit`；plan 的 `match_status` 取“文件级 status 与 score 推导 status 的较低者”，不得仅按 score 提升。status 全序为 `high > medium > low > unmatched`；`disabled`/`unavailable` 不参与该全序，按本地降级命名处理。
+* `match_status` 为 `low`/`unmatched`，或 `match_score < 0.6`，或 `title_hit=false` 时，单元进入 `unplanned/low_confidence`，不生成 target/operations；`disabled`/`unavailable` 例外。`medium` 且 `title_hit=true` 可 planned，但必须带 `medium_confidence` warning。该闸门必须在 `_movie_unit` 之前生效，不允许先生成 unit 再过滤。
 * `detection.truncated=true` 或达到 `--max-files` 上限时，扫描记录 `warning.code = "scan.truncated"`，不基于截断结果生成执行计划。
 * 扫描阶段不写媒体文件；`scan.json` 只写 session 目录或用户显式指定的 `--out` 路径。
 
@@ -465,24 +488,38 @@ MediaDetect 的 `files[].path` 是 NFC 归一化的相对路径，真实文件�
 | `流浪地球2.2023.1080p.mkv` | title=流浪地球2, original=The Wandering Earth II, year=2023, imdb=tt13539646 | `流浪地球2 The Wandering Earth II (2023) {tt13539646}/` |
 | `Inception.2010.mkv` | title=Inception, original=Inception, year=2010, imdb=tt1375666 | `Inception (2010) {tt1375666}/` |
 | `某片.mkv` | title=某片, original=null, year=0, imdb=null, tmdb=123 | `某片 {tmdb123}/` |
-| 未匹配但有 best | title=某片, year=2020, score 低于阈值 | `某片 (2020)`，`warning: weak_match`，需确认 |
+| 未匹配但有 best | title=某片, year=2020, score 低于阈值 | `unplanned/low_confidence`，不生成操作 |
 
 电影目标路径：
 
 * **目录输入**：只有通过 4.3.1.1 正面校验时，才整体重命名为 `<parent>/<target>`；目录内的字幕、NFO、封面不单独列出，随目录一起移动。未通过校验时按多电影/文件单元处理，不重命名通用容器。
 * **文件输入，父目录通过单电影目录正面校验**（4.3.1.1）：unit = 父目录，root = 祖父目录；重命名父目录，不新建嵌套目录，也不把 `.media-title` 放进影片目录。
 * **文件输入，其他情况**：`<parent>/<target>/` 作为新目录；移动主视频 + 同 stem 的附属文件（`.srt/.ass/.ssa/.sub/.idx/.nfo/.jpg/.jpeg/.png/.webp`）。
-* **多分部/多版本**：至少覆盖以下 token；任一文件命中且无法证明是完整单文件时，v1 标记 `unplanned/unsupported_multipart`，不自动拆成多个电影目录，也不猜。
+* **多分部/多版本**：分为“硬分卷 token”和“Part N 候选”两类；硬分卷一旦命中即 `unplanned/unsupported_multipart`，Part N 候选必须通过 4.4.2.1 的 TMDB 证明才能按单片处理。
 
-| 类别 | 示例 |
-| --- | --- |
-| CD/Disc/Disk | `CD1/CD2`、`Disc1/Disc2`、`Disk.A/Disk.B` |
-| Part/Pt | `Part1/Part2`、`Part.A/Part.B`、`Pt1/Pt2` |
-| 分数式 | `1of2/2of2`、`1-2` 后缀 |
-| 上下/前后 | `上集/下集`、`上部/下部`、`前篇/后篇` |
-| 字母后缀 | `Movie-A/Movie-B` |
+| 类别 | 示例 | 行为 |
+| --- | --- | --- |
+| CD/Disc/Disk | `CD1/CD2`、`Disc1/Disc2`、`Disk.A/Disk.B` | 硬分卷，`unplanned` |
+| 分数式 | `1of2/2of2`、`1-2` 后缀 | 硬分卷，`unplanned` |
+| 上下/前后 | `上集/下集`、`上部/下部`、`前篇/后篇` | 硬分卷，`unplanned` |
+| Part/Pt 字母 | `Part.A/Part.B`、`Pt.A` | 硬分卷，`unplanned` |
+| 字母后缀 | `Movie-A/Movie-B`，且 A/B 必须是文件名主干（去掉扩展名和发布标签后）的最后一个 token | 硬分卷，`unplanned` |
+| Part/Pt 数字 | `Part.1/Part2`、`Pt2` | 候选；通过 4.4.2.1 后按单片，否则 `unplanned` |
 
-计划级规则：若两个 movie 单元解析到同一 TMDB id、同一目标 basename，或同一归一化 `(title, year)`，则**全部**标 `unplanned/unsupported_multipart`，不生成任何 move；不得因为匹配结果不同而把一部电影拆成两个目录。单个文件命中分部 token 但没有配套另一半时，也标 unplanned。
+* 普通标题中的冠词/介词 `A`/`B`（`A.City.of.Sadness`、`B.for.Busy`、`Story.of.a.Murderer`）和发行组 `PTH`/`PTer` 不得命中分卷规则。
+* `Part/Pt` 之后必须有分隔符或数字；`-PTH.` 不能被拆成 `pt` + `h`。
+* `前編/後編` 不加入分卷词；像 `3月のライオン.後編` 这类续集电影按普通电影走 TMDB。
+* 计划级规则：若两个 movie 单元解析到同一 TMDB id、同一目标 basename，或同一归一化 `(title, year)`，则**全部**标 `unplanned/unsupported_multipart`，不生成任何 move；不得因为匹配结果不同而把一部电影拆成两个目录。
+
+##### 4.4.2.1 Part N 独立电影判定
+
+`Part N` 可能是真正拆盘的同一部电影，也可能是独立电影（如《哈利·波特与死亡圣器》上/下）。v1 采用 TMDB 证明，不新增开关：
+
+1. 文件名去掉扩展名后，按 4.9 的分词规则命中 `Part N`/`Pt N`（N 为 1-99 的整数）；字母 `Part.A/B` 仍按硬分卷处理。
+2. 必须使用真实 TMDB 匹配（`match.best` 存在且不是 `local`）；`--match=off`、`disabled`、`unavailable`、`error` 或只有本地 best 时，保持 `unplanned/unsupported_multipart`。
+3. `match.best.title` 或 `match.best.original_title` 归一化后必须包含与文件名相同的 `part N` 片段（允许 `part.1`/`part 1`/`part-1`，大小写不敏感）。标题不含对应 Part N 视为真正拆盘，保持 unplanned。
+4. 多个 `Part N` 文件各自匹配到不同 TMDB id 且标题证明成立时，可各自成为 movie 单元；若同一 TMDB id/目标 basename 冲突，按计划级规则全部 unplanned。
+5. 该判定同时用于单文件扫描、目录扫描和 movie 分组；单文件与目录结果必须一致。
 
 * **多电影目录**：每个目标目录建在 **root 的直接下级**，不嵌在某个电影子目录内部。若 root 就是合集目录输入，目标建在合集目录内；合集目录清空后生成 `remove_empty_dir`。
 * **目录已存在**：一律冲突；v1 不允许把目录重命名合并进已存在目录，也不提供 `--merge-existing`。
@@ -569,14 +606,15 @@ G6 还必须修正 `mapping.go` 的 `displayTitles`/`stripEpisode`：连续 `E` 
 | 匹配状态 | 计划处理 | 展示 |
 | --- | --- | --- |
 | `high` | 生成操作 | 正常；仍需用户确认 |
-| `medium` | 生成操作 | 标记“建议核对” |
-| `low` | 生成操作 | 标记“低置信度” |
-| `unmatched` 且有 best | 生成操作 | 标记“弱匹配”，默认排在后面 |
+| `medium` 且 `title_hit=true` | 生成操作 | 标记“建议核对”与匹配 warning |
+| `medium` 且 `title_hit=false` | `unplanned/low_confidence` | 不生成操作 |
+| `low` | `unplanned/low_confidence` | 不生成操作 |
+| `unmatched` 且有 best | `unplanned/low_confidence` | 不生成操作 |
 | `unmatched` 无 best | 不生成操作 | `unplanned/no_match` |
 | `multiple` | 不把顶层 best 当单元结果；使用 `files[].match.best` 生成多电影单元 | 标记“多电影目录” |
 | `not_applicable` | 非电影（剧集/附属） | 不参与电影命名 |
-| `disabled` / `unavailable` | 用本地标题/年份生成降级名称（若有） | `warning: no_tmdb`；无本地标题则 `unplanned` |
-| `error` | 记录单元错误；`auto` 可降级本地命名，`on` 不猜 | `warning: tmdb_error`；默认 `unplanned` |
+| `disabled` / `unavailable` | 用本地标题/年份生成降级名称（若有） | `warning: no_tmdb`；不受 low/score/title_hit 闸门影响 |
+| `error` | `unplanned/low_confidence`；`on` 不猜 | `warning: tmdb_error` |
 
 如果用户期望 IMDB ID 但环境没有 `TMDB_API_KEY`，扫描结果中用 `warning: tmdb_key_missing` 提示；仍可按本地标题生成计划，不把缺少密钥当作失败。
 
@@ -592,7 +630,7 @@ G6 还必须修正 `mapping.go` 的 `displayTitles`/`stripEpisode`：连续 `E` 
   "state_dir": "/Volumes/Media/Downloads/.media-title/sessions/20261112T120000Z-a1b2c3d4",
   "plan_id": "sha256:4f2c...",
   "generated_at": "2026-11-12T12:00:00Z",
-  "tool_version": "0.1.0",
+  "tool_version": "0.1.1",
   "root": "/Volumes/Media/Downloads",
   "mode": "library",
   "options": {
@@ -652,7 +690,7 @@ G6 还必须修正 `mapping.go` 的 `displayTitles`/`stripEpisode`：连续 `E` 
 * `apply`/`rollback` 还要求 `--expect-plan-id` 与 `plan.json`、`state.json` 中的 `plan_id` 三者一致；用户确认的是哪个计划，就只能执行哪个计划。不一致返回 `E_EXPECT_PLAN_MISMATCH`。
 * `apply` 首次执行前把通过校验的计划原子写为 `<session>/applied-plan.json`；之后 `rollback` 在 `plan.json` 被替换/删除时，用 `--session-dir` 指向原 session 目录并读取该快照继续，`plan_id` 必须与 `--expect-plan-id` 一致。快照存在但哈希不符 → `E_PLAN_HASH_MISMATCH`；`--session-dir` 的 token/state_dir 不匹配（包括 session 目录被移动）→ `E_SESSION_STATE_MISSING`。
 * `units[]` 只包含可执行的 `planned` 单元；`unplanned[]` 每条至少含 `path`、`kind`、`reason_code`、`reason`；`skipped[]` 每条至少含 `path`、`reason_code`、`reason`。`unplanned`/`skipped` 不分配可执行 unit ID，不能被 `--select`。
-* `reason_code` 是稳定枚举，至少包括：`unsupported_multipart`、`unsupported_multi_episode`、`ambiguous_loose_shows`、`ambiguous_season_parent`、`needs_directory_mode`、`no_match`、`E_PATH_IDENTITY`、`season_unknown`、`name_empty`。
+* `reason_code` 是稳定枚举，至少包括：`unsupported_multipart`、`unsupported_multi_episode`、`ambiguous_loose_shows`、`ambiguous_season_parent`、`needs_directory_mode`、`no_match`、`E_PATH_IDENTITY`、`season_unknown`、`name_empty`、`low_confidence`。
 * `session_id`、`session_token`、`plan_id`、`unit.id` 都是不可信输入，使用前做字符集和存在性校验。
 
 单元模型：
@@ -745,7 +783,8 @@ G6 还必须修正 `mapping.go` 的 `displayTitles`/`stripEpisode`：连续 `E` 
 | `E_CROSS_DEVICE` | 源与目标不在同一文件系统 | 预检失败，退出 3 |
 | `E_NAME_TOO_LONG` | 目标分量超过 240 字节 | 预检失败，退出 3 |
 | `E_PATH_IDENTITY` | MediaDetect NFC 路径无法唯一映射到原始路径 | 扫描记录 `unplanned`；预检发现时退出 3 |
-| `E_NO_REPLACE_UNSUPPORTED` | 平台/文件系统不支持所需的文件或目录 no-replace 移动 | 预检失败，退出 3，零媒体改动 |
+| `E_NO_REPLACE_UNSUPPORTED` | 平台/文件系统不支持所需的文件或目录 no-replace 移动；或日志要求 `check-then-rename` 但本次未显式开启 `--no-replace=check` | 预检失败，退出 3，零媒体改动 |
+| `E_NON_ATOMIC_MOVE_FAILED` | 显式 `check` 模式下检查/rename/移动后校验失败 | 停止并保留现场；已执行的反向操作按 rollback 日志恢复 |
 | `E_SESSION_BUSY` | 同一 session 已有 `apply` 持有锁 | 退出 3 |
 | `E_UNIT_STATE_CONFLICT` | `failed` 或对账后不完整的 `applying` 单元，未带 `--retry-failed` | 退出 3，要求先 rollback 或显式重试 |
 | `E_SESSION_STATE_MISSING` | state 显示已 apply 但日志/快照缺失，或 token/plan/state_dir 不属于本计划 | 退出 3，拒绝以零单元成功 |
@@ -760,7 +799,8 @@ G6 还必须修正 `mapping.go` 的 `displayTitles`/`stripEpisode`：连续 `E` 
 
 * 预检开始时先对 `applying` 单元做日志对账；已完整 done 的单元提升为 `applied` 并从本次选择排除，避免 `--select all` 因已完成单元的源消失而中止。
 * 对每个选中 unit 重新枚举其 sources 以及父目录中**会归属到该 unit 的条目**（同 stem 侧车、同一 movie group 的视频/附属、同一剧集的 episode 文件），与 `sources[]` 比较；这些条目新增/删除/替换 → `E_SOURCE_STATE_MISMATCH`。无关文件不算变化，避免 `Downloads` 里有其他下载时误报。
-* 对计划中每个不同的 `st_dev` 和每种操作类型（文件 move、目录 move）在实际目标父目录所在文件系统做 no-replace 探测；任一失败 → `E_NO_REPLACE_UNSUPPORTED`，零媒体改动。
+* 对计划中每个不同的 `st_dev` 和每种操作类型（文件 move、目录 move）在实际目标父目录所在文件系统做能力分级探测：平台级 no-replace → `link+unlink`（仅文件）→ 显式 opt-in 的 check-then-rename。`strict` 下前两级都失败即 `E_NO_REPLACE_UNSUPPORTED`；`check` 下第三级也失败才拒绝。任一失败均零媒体改动。
+* `--no-replace=check` 时，探测结果记录每个 `(st_dev, kind)` 的 `move_capability`（`native`/`link_unlink`/`check_then_rename`）；移动方法必须在 intent/done 日志中记录，不得在事后猜测。
 * `rollback` 在执行第一条反向操作前，先校验所有选中日志条目的当前状态、逆向目标不存在、`session_token`/`plan_id` 一致；任何冲突返回全部冲突，零改动。
 * 所有路径先 `realpath` 再判断包含关系；拒绝 `..` 和指向根外的符号链接。
 * 大小写不敏感文件系统（macOS 默认 APFS）上，目标存在性检查使用大小写折叠比较；同时做 NFC 归一化比较，避免 Unicode 等价名冲突。
@@ -779,11 +819,14 @@ POSIX `rename(2)` 会覆盖已存在的文件；预检后到 `rename` 之间还�
   * Linux：`renameat2(AT_FDCWD, src, AT_FDCWD, dst, RENAME_NOREPLACE)`，通过 `ctypes` 调用；`ENOSYS`/`EINVAL` 时进入回退。
   * macOS：`renamex_np(src, dst, RENAME_EXCL)`，通过 `ctypes` 调用。
   * 普通文件回退：`os.link(src, dst, follow_symlinks=False)` + `os.unlink(src)`；`link` 遇到 `EEXIST` 就是冲突。
-  * 目录在 no-replace 不可用时**拒绝移动**，不使用 `link` 回退。
+  * 目录在 no-replace 不可用时**默认拒绝移动**，不使用 `link` 回退；仅显式 `--no-replace=check` 时才进入 check-then-rename。
+  * 显式 `check` 的第三级回退：`os.path.lexists(dst)` 命中即 `E_TARGET_EXISTS`；确认不存在后调用普通 `os.rename(src, dst)`。这是非原子操作，存在检查与 rename 之间目标被外部创建的竞态窗口，必须记录 `warning: non_atomic_move`。
 * **能力探测**：`apply` 在预检阶段对每个计划涉及的 `st_dev` 和每种操作类型（文件、目录）在实际目标父目录所在文件系统创建临时条目，真实执行一次 no-replace 移动/`link` 探测，然后清理。目标父目录尚不存在时，使用最近的已存在祖先并校验其 `st_dev` 与目标路径的预期设备一致。任一失败返回 `E_NO_REPLACE_UNSUPPORTED`，在任何媒体文件操作之前拒绝。不得只靠平台名假设 SMB/NFS/exFAT 支持，也不能只测 session 目录。
+* `E_NO_REPLACE_UNSUPPORTED` 的 message 必须包含明确指引：若这是 SMB/NFS 等文件系统，用户确认风险后可在 `apply` 与后续 `rollback` 上同时使用 `--no-replace=check` 或 `MEDIA_TITLE_ALLOW_CHECK_RENAME=1`。不得自动启用，也不得根据平台名替代实际探测。
 * **intent 先写**：每个 `move` 执行前先写 `{"phase":"intent", ..., "from_state":...}` 并 `fsync`；成功后写 `{"phase":"done", ..., "to_state":...}`。崩溃恢复时按 intent 对账，不依赖“日志只有成功记录”。
 * `link+unlink` 回退中，`link` 成功但 `unlink(src)` 失败时，先尝试 `unlink(dst)` 回滚到源；回滚成功则报告 `E_APPLY_FAILED` 且源保持原位。若回滚也失败，记录两个硬链接的现场；崩溃恢复遇到 `from`/`to` 同时存在且同 inode 时，按“完成移动”处理：`unlink(from)` 成功则写 `done`，失败则停止并保留现场。绝不能删除 `to` 后写 `done`。
-* 移动前 `lstat(src)`，移动后 `lstat(dst)`，校验 `st_dev`/`st_ino` 与移动前一致；不一致说明源在窗口内被替换，立即停止并记录。
+* 移动前 `lstat(src)`，移动后 `lstat(dst)`。原生/`link+unlink` 方法校验 `st_dev`/`st_ino` 与移动前一致；`check_then_rename` 因 SMB 等文件系统的 inode 不可靠，改为校验文件 `size` + `mtime_ns`，目录校验顶层 `mtime_ns` + 可移植子树指纹（相对路径、类型、`size`、`mtime_ns`，不比较 `dev/ino`）。SMB 服务端改写 mtime 时按 4.7.4 的 utime 恢复/`size_portable` 策略处理；size 或子树指纹不一致说明源在窗口内被替换或移动失败，立即停止并记录 `E_NON_ATOMIC_MOVE_FAILED`。
+* `check_then_rename` 的 intent 记录 `move_method=check_then_rename`、`atomic=false`、`validation=size_mtime`（目录为 `portable_subtree`）；done 记录实际 `to_state` 和校验结果。原生/`link+unlink` 分别记录 `move_method=native`/`link_unlink`、`atomic=true`。
 * `dst` 的父目录必须已存在且是目录；否则 `E_TARGET_EXISTS`/`E_INTERNAL`。
 * 不跟随符号链接；`src` 是符号链接时直接拒绝。
 
@@ -792,6 +835,20 @@ POSIX `rename(2)` 会覆盖已存在的文件；预检后到 `rename` 之间还�
 * `mkdir`：intent 先记录 `pre_exists` 与存在时的 `pre_state`；`os.mkdir(path)`；`EEXIST` 时用 `lstat` 确认是目录，记录 `created=false`；是文件则冲突。done 记录 `created` 和 ino；回滚只删除 `created=true` 的目录。
 * `remove_empty_dir`：intent 先记录 `pre_empty=true` 与 `removed_state`；`os.rmdir(path)`；`ENOTEMPTY` 时跳过并记录 `leftover`，不递归删除；`ENOENT` 视为已完成（幂等），不是失败。执行前 `scandir` 确认没有条目（不跟随符号链接）。
 * 回滚 `remove_empty_dir` 时重新 `mkdir`；目录的 inode/mtime 无法恢复，Spec 只承诺恢复结构和文件。
+
+#### 4.7.4 check-then-rename 降级（显式 opt-in）
+
+`check-then-rename` 只用于 SMB/NFS 等既不支持 `renameat2`/`renamex_np` 原子 no-replace、也不支持硬链接的文件系统：
+
+* **默认关闭**：`--no-replace` 默认 `strict`。只有用户显式传 `--no-replace=check` 或设置 `MEDIA_TITLE_ALLOW_CHECK_RENAME=1` 才启用；CLI 参数优先于环境变量，其他值返回 `E_USAGE`。
+* **不覆盖**：`check` 模式在 rename 前用 `lexists` 检查目标，存在即 `E_TARGET_EXISTS`。这是 best-effort，不是原子保证；文档与 `SKILL.md` 必须写明检查与 rename 之间的竞态窗口。
+* **能力探测**：`check` 模式仍先尝试平台级 no-replace 和 `link+unlink`；只有两者都不可用时才使用 `check_then_rename`。探测必须实际执行一次临时目标检查 + `rename`，确认文件与目录都能 rename，并清理临时条目；探测失败仍返回 `E_NO_REPLACE_UNSUPPORTED`。
+* **SMB 指纹**：`check_then_rename` 不信任 `dev/ino`。文件比较 `size`/`mtime_ns`；目录使用可移植子树指纹（相对路径、类型、文件 `size`/`mtime_ns`，不包含 `dev/ino`），并在 rollback 时用同一模式重算。
+* **SMB mtime 改写**：rename 后先按内容指纹校验（文件 size；目录相对路径+类型+size，不含 mtime/dev/ino）；一致后尝试 `os.utime(dst, ns=(before.mtime_ns, before.mtime_ns))`。恢复成功时文件 `validation=size_mtime`、目录 `validation=portable_subtree`；恢复失败但内容指纹一致时允许成功，`validation=size_content`，输出 `warning: mtime_rewritten`。内容指纹不一致仍 `E_NON_ATOMIC_MOVE_FAILED` 并恢复源。rollback 反向移动使用同一策略，并尽力恢复到 `from_state.mtime_ns`。
+* **告警**：apply/rollback 的 JSON 结果与人类输出都包含 `warning: non_atomic_move`（至少含 path、method、atomic=false）；apply.log/rollback.log 的 intent 与 done 都记录 `move_method`/`atomic`/`validation`。没有告警的 check 移动视为实现缺陷。
+* **rollback**：若 apply.log 中存在 `move_method=check_then_rename` 的条目，`rollback` 必须显式带 `--no-replace=check` 或环境变量；否则在预检阶段返回 `E_NO_REPLACE_UNSUPPORTED`，零改动。rollback 的反向 move 也记录同样字段，二次 rollback 幂等。
+* **范围**：`mkdir`/`remove_empty_dir` 不需要 no-replace，不受该模式影响；跨设备仍拒绝，不做复制+校验+删除。
+* **禁止默认化**：不得在检测到 SMB/NFS 后自动开启；不得把 `check` 作为回退默认值。
 
 ### 4.8 变更日志与回滚
 
@@ -808,7 +865,7 @@ POSIX `rename(2)` 会覆盖已存在的文件；预检后到 `rename` 之间还�
 
 * `apply` 和 `rollback` 都使用 `fcntl.flock` 对 `<session>/apply.lock` 加排他锁；同一 session 并发执行返回 `E_SESSION_BUSY`。不同 session 互不影响。
 * 每个操作分两条日志：执行前 `phase=intent`，成功后 `phase=done`；两条都立即追加并 `fsync`。每条日志都带 `session_id`、`session_token`、`plan_id`、`state_dir`；apply/rollback 启动时校验这些字段，外来或复制日志直接 `E_SESSION_STATE_MISSING`。
-* `move` 的 intent 记录 `from_state`、`to_absent=true`；done 记录 `to_state`，目录 move 额外记录 `to_subtree_hash`/`entry_count`。`mkdir` 的 intent 记录 `pre_exists`/`pre_state`；done 记录 `created`/`ino`。`remove_empty_dir` 的 intent 记录 `pre_empty=true`/`removed_state`；done 记录 `removed_state`/`result`。
+* `move` 的 intent 记录 `from_state`、`to_absent=true`、`move_method`、`atomic`、`validation`；done 记录 `to_state`，目录 move 额外记录 `to_subtree_hash`/`entry_count`。`check_then_rename` 的 `to_subtree_hash` 使用可移植模式（不含 `dev/ino`）。`mkdir` 的 intent 记录 `pre_exists`/`pre_state`；done 记录 `created`/`ino`。`remove_empty_dir` 的 intent 记录 `pre_empty=true`/`removed_state`；done 记录 `removed_state`/`result`。
 * 崩溃恢复对账表（`apply` 与 `rollback` 共用）：
   * **move intent**
     * `from` 存在、`to` 不存在 → 未执行；删除/标记该 intent，重试或跳过。
@@ -833,12 +890,14 @@ POSIX `rename(2)` 会覆盖已存在的文件；预检后到 `rename` 之间还�
   * 当前 `to` 状态匹配日志 `to_state` → 反向移动；
   * 当前 `from` 状态已匹配日志 `from_state` → 视为已回滚，跳过；
   * 其他状态 → `E_ROLLBACK_CONFLICT`，停止，不强行覆盖。
-  * 文件用 `dev`/`ino`/`size`/`mtime_ns` 匹配；目录除顶层 `dev`/`ino`/`mtime_ns` 外，还必须匹配递归 `to_subtree_hash`/`entry_count`；任何新增/删除/修改即冲突，避免把执行后新增的文件一起移回。
+  * 原生/`link_unlink` 文件用 `dev`/`ino`/`size`/`mtime_ns` 匹配；目录除顶层 `dev`/`ino`/`mtime_ns` 外，还必须匹配递归 `to_subtree_hash`/`entry_count`。
+  * `check_then_rename` 文件用 `size`/`mtime_ns` 匹配，目录用顶层 `mtime_ns` + 可移植 `to_subtree_hash`/`entry_count`（不含 `dev/ino`）。若 apply 记录 `validation=size_content`，rollback 忽略 mtime，按 size + 不含 mtime 的内容指纹比较。任何新增/删除/修改即冲突，避免把执行后新增的文件一起移回。
+  * rollback 的 `--no-replace` 模式必须能覆盖日志中的方法：日志含 `check_then_rename` 而调用方未显式 opt-in → `E_NO_REPLACE_UNSUPPORTED`，零改动。
 * `rollback` 本身也写 `rollback.log.jsonl` 的 intent/done，并使用同一套对账逻辑；反向 `link+unlink` 中断同样按“完成移动”处理，保证第二次 rollback 幂等。
 * `mkdir` 的 `created=true`、目录为空且 `ino` 与日志一致 → 删除；`created=false` → 跳过；目录已不存在 → 视为已回滚，跳过。
 * `remove_empty_dir` 的逆操作是重新创建目录（结构恢复，inode/mtime 不保证）；目录已存在 → 视为已回滚，跳过。
 * `rollback` 写 `rollback.log.jsonl`，并把 `state.json` 对应 unit 改为 `rolled_back`；第二次 `rollback` 全部条目都被识别为已回滚，返回成功且不移动文件。
-* 回滚本身也使用 no-replace 安全移动；回滚冲突时停止并保留现场。
+* 回滚本身也使用 no-replace 安全移动；若原 apply 使用 `check_then_rename`，回滚必须显式 opt-in 并沿用可移植指纹；回滚冲突时停止并保留现场。
 
 ### 4.9 分类与命名的防御性规则
 
@@ -851,7 +910,7 @@ POSIX `rename(2)` 会覆盖已存在的文件；预检后到 `rename` 之间还�
 * **CJK 季号**：只信 `files[].season`；`summary.seasons` 不参与逐文件补季。
 * **`title_candidates` 为空**：不能凭空造剧名；必须有目录上下文，否则 `unplanned`。裸 CJK 集号（如 `第2集.mkv`）常见为空；带剧名前缀时通常保留候选。
 * **多集写法**：非连续、跳号或无法证明数值连续的多集写法（`S01E01E03`、`S01E01E02E04`、`S01E01E02-E04`）对所有 `media_type` 一律 `unplanned/unsupported_multi_episode`，不查 TMDB、不移动。
-* **多分部/多版本**：按 4.4.2 的 token 表识别；同一 TMDB id、同一目标 basename 或同一归一化 `(title, year)` 的多个电影单元全部 `unplanned/unsupported_multipart`，不拆成多个电影目录。
+* **多分部/多版本**：按 4.4.2 的 token 表识别；硬分卷直接 `unplanned`，`Part N` 按 4.4.2.1 的 TMDB 证明判定。同一 TMDB id、同一目标 basename 或同一归一化 `(title, year)` 的多个电影单元全部 `unplanned/unsupported_multipart`，不拆成多个电影目录。
 * **游离季目录**：只有**整名**匹配 `Season N`/`S0N`/`第 N 季` 且父目录通过可信剧容器校验才是季单元；父目录不是可信容器（例如直接位于 `Media/`、`Downloads/` 下）→ `unplanned/ambiguous_season_parent`，不拿通用目录名当剧名。`Some.Show.S01.1080p` 不是季目录，按扁平剧目录处理。
 * **unplanned 可见**：`plan.json` 的 `unplanned[]` 必须逐条列出 path/kind/reason_code；报告不得只给计数。
 * **同路径判断**：用 `samefile`/`realpath`，不用字符串相等。
@@ -879,7 +938,8 @@ v1 包含一条最小 CLI 修复（G6），只改 parser，不改其他检测行
 * **同步修正 `mapping.go` 的 `displayTitles`/`stripEpisode`**：2 段和 3 段连续 `E` 段、以及范围（`S01E01-E02`）都要从展示标题中剥离；测试断言 `Show.S01E01E02.mkv` 与 `Show.S01E01E02E03.mkv` 的 `title_candidates` 都是 `["Show"]`，不含 `E02`/`E02E03`。
 * 不修改 `schema_version`、不新增 JSON 字段、不改变其他媒体类型和匹配逻辑。
 * 新增测试：parser 单测、`Detect` 集成测试、CLI 输出测试；现有 Go 测试全部通过。
-* 版本按 patch 发布为 `v0.2.1`：`cmd/mediadetect/config.go` 的 `defaultVersion`、`cmd/mediadetect/main_test.go` 的版本断言、README 的版本/安装 tag/已知限制、SPEC-001 的已知限制、SPEC-002 的 G4/G5 版本口径同步修订；`--version` 断言输出 `0.2.1`（或发布构建注入的等价版本）。
+* G6 历史版本按 patch 发布为 `v0.2.1`：`cmd/mediadetect/config.go` 的 `defaultVersion`、`cmd/mediadetect/main_test.go` 的版本断言、README 的版本/安装 tag/已知限制、SPEC-001 的已知限制、SPEC-002 的 G4/G5 版本口径同步修订；历史 `--version` 断言输出 `0.2.1`。
+* 当前发布口径由 SPEC-004 T5 更新为 MediaDetect `v0.2.2`、media-title `v0.1.1`：`defaultVersion`、README 安装 tag、CI 版本断言、技能 `metadata.version` 与 `tool_version` 同步；`--version` 断言输出 `0.2.2`。
 
 其他 CLI 变更：
 
@@ -901,6 +961,8 @@ SPEC-001 影响与流程：
 * 向用户展示文件名时转义控制字符（尤其是换行），避免路径内容伪造计划表格或确认提示。
 * 拒绝符号链接源和目标；拒绝根外路径；拒绝保护根。
 * 不覆盖、不删除非空目录；`remove_empty_dir` 前再次检查目录为空。
+* no-replace 默认严格；不得根据文件系统类型自动启用 check-then-rename。只有用户显式 `--no-replace=check` 或 `MEDIA_TITLE_ALLOW_CHECK_RENAME=1` 才允许，且必须在计划/执行/回滚输出中展示 `non_atomic_move` 告警与竞态说明。
+* `check_then_rename` 的检查与 rename 之间存在竞态窗口，可能覆盖外部进程在该窗口创建的同名目标；这是用户显式接受的风险，不属于静默降级。
 * 默认同设备移动；跨设备拒绝，避免“复制一半后删除源”的风险。
 * no-replace 移动不可用时拒绝操作，不退回普通 `rename`。
 * session ID 只允许安全字符，防止日志路径穿越；`plan_id`/unit ID 做格式校验。
@@ -916,13 +978,13 @@ SPEC-001 影响与流程：
 * **session 完整性**：`scan.json`/`plan.json`/`state.json`/日志中的 `session_id`、`session_token`、`plan_id`、`state_dir` 必须一致；复制、移动或外来 session 目录不能驱动 apply/rollback。
 * **目录回滚指纹**：目录 move 的 `to_subtree_hash` 覆盖所有后代；回滚前重算，新增/删除/修改即 `E_ROLLBACK_CONFLICT`，整个回滚零改动。
 * 同一输入、同一选项生成的计划除 `plan_id`、`generated_at` 外保持一致。
-* 对已整理目录再次 `scan`，`planned` 单元数为 0。
+* 对已整理目录再次 `scan`，`planned` 单元数为 0；名称含 `{tt...}`/`{tmdb...}` 的条目在 scan 阶段直接进入 `skipped/already_organized`，不调用 MediaDetect。
 * 重复 `apply` 同一 unit 不重复移动；重复 `rollback` 不把回滚撤销。
 * 失败的单个单元不污染其他单元的计划；`apply` 失败停止并保留已完成日志。
 
 ### 5.2 性能
 
-* 每个单元一次 MediaDetect 调用，外加一次根分类；100 个单元约 101 次调用。
+* 每个单元一次 MediaDetect 调用，外加一次根分类；100 个单元约 101 次调用。已整理条目（`{tt...}`/`{tmdb...}`）在默认扫描下 0 次 MediaDetect 调用，调用次数不随已整理目录数量增长。
 * 默认 `--probe=off`，避免对每个文件启动 ffprobe/exiftool。
 * 单元顺序处理，不并发调用 TMDB，避免限流和结果不确定性；后续可按需增加 `--jobs`。
 * 根分类使用 `--max-depth 0`，但通过 `--max-files` 控制规模；截断时停止计划。
@@ -949,19 +1011,19 @@ SPEC-001 影响与流程：
 
 | 文件 | 覆盖 |
 | --- | --- |
-| `test_scan.py` | 根模式 auto/single/library 的规则顺序；单电影目录正面校验（`Downloads/Inception.2010.mkv`、父目录一电影一剧集、`.iso`/`.part`/隐藏项负例）；单/多电影目录；`tv_episode` 单文件；季目录/扁平季目录；季目录内单集文件 `needs_directory_mode`；多剧库根；散落电影+剧集 mixed；通用下载目录散落文件；同名不同年份 unplanned；多剧混放 unplanned；多分部变体 unplanned；已整理跳过；mediadetect 失败；`E_SCHEMA_UNSUPPORTED`；`scan.truncated`；多集防御（所有 media_type） |
+| `test_scan.py` | 根模式 auto/single/library 的规则顺序；单电影目录正面校验（`Downloads/Inception.2010.mkv`、父目录一电影一剧集、`.iso`/`.part`/隐藏项负例）；单/多电影目录；`tv_episode` 单文件；季目录/扁平季目录；季目录内单集文件 `needs_directory_mode`；多剧库根；散落电影+剧集 mixed；通用下载目录散落文件；同名不同年份 unplanned；多剧混放 unplanned；多分部变体 unplanned；已整理跳过；mediadetect 失败；`E_SCHEMA_UNSUPPORTED`；`scan.truncated`；多集防御（所有 media_type）；分卷表驱动：`CD1/CD2`、`Part.1/Part1/pt2`、`1of2`、`Movie.A/Movie.B` 命中；`A.City.of.Sadness`、`B.for.Busy`、`Story.of.a.Murderer`、`PTH`、`後編` 不命中；Part N 在 TMDB 标题证明成立时按单片、无证明时 unplanned；`{tt...}`/`{tmdb...}` 目录与文件默认 0 次 MediaDetect 调用并进 skipped、`--include-organized` 恢复检测、不递归已整理目录 |
 | `test_plan.py` | 电影命名（original_title/年份/ID 缺失）、弱匹配、未匹配、多分部 unplanned、附属文件、剧集结构、可信剧容器（名称一致性优先）、散落剧集 `(title, year)` 分组、CJK 季号、季号未知、集重命名、大小写与 Unicode 冲突、计划哈希、`sources[]` 覆盖不变量、共享 mkdir、`unplanned[]` 契约与 reason_code、全有或全无、`session_token`/`state_dir`、`applied-plan.json`、目录子树指纹 |
-| `test_fsops.py` | no-replace 能力探测（按 `st_dev` 和文件/目录分别探测）、目标已存在、TOCTOU mock、`link+unlink` 中断完成移动、mkdir `pre_exists`/`created` + ino、remove_empty_dir 非空/ENOENT 幂等、跨设备 mock、硬链接警告 |
+| `test_fsops.py` | no-replace 能力探测（按 `st_dev` 和文件/目录分别探测）、目标已存在、TOCTOU mock、`link+unlink` 中断完成移动、mkdir `pre_exists`/`created` + ino、remove_empty_dir 非空/ENOENT 幂等、跨设备 mock、硬链接警告；mock `renamex_np`/`renameat2` 返回 ENOTSUP/EINVAL 且 `os.link` 抛 EPERM：默认 `E_NO_REPLACE_UNSUPPORTED`、`check` 模式成功且不覆盖、size/mtime 校验失败、目标存在冲突 |
 | `test_paths.py` | NFC/NFD 映射、原始路径、路径越界、保护根（含 `/mnt`、`/media`、`/home`）、名称清洗、超长名、`samefile` 判断 |
 | `test_session.py` | session 布局、ID 校验、一 session 一 plan、`session_token`/`state_dir` 校验、`applied-plan.json`、apply/rollback 共享锁、状态文件原子写、复制/移动 session 目录拒绝 |
-| `test_apply.py` | `--expect-plan-id`、强制 `--yes`/`--select`、按 unit 分批、共享 mkdir、`applying` 状态、intent/done 日志、mkdir/remove 崩溃对账、done 后 state 前崩溃后继续剩余单元、`--retry-failed`、重复 apply 幂等、plan 后新增侧车 `E_SOURCE_STATE_MISMATCH`、部分失败 |
-| `test_rollback.py` | 从日志派生 unit、intent 对账、目录递归子树指纹冲突、回滚整体预检、二次回滚幂等、rollback 自身 intent/done、plan 被替换时用 `applied-plan.json`、日志缺失 `E_SESSION_STATE_MISSING`、mkdir `created=false` 不删除、空目录重建、rollback 持锁 |
+| `test_apply.py` | `--expect-plan-id`、强制 `--yes`/`--select`、按 unit 分批、共享 mkdir、`applying` 状态、intent/done 日志、mkdir/remove 崩溃对账、done 后 state 前崩溃后继续剩余单元、`--retry-failed`、重复 apply 幂等、plan 后新增侧车 `E_SOURCE_STATE_MISMATCH`、部分失败；`--no-replace=check`/环境变量优先级、默认严格拒绝、`non_atomic_move` warning 与日志字段、check 模式目标存在 `E_TARGET_EXISTS` |
+| `test_rollback.py` | 从日志派生 unit、intent 对账、目录递归子树指纹冲突、回滚整体预检、二次回滚幂等、rollback 自身 intent/done、plan 被替换时用 `applied-plan.json`、日志缺失 `E_SESSION_STATE_MISSING`、mkdir `created=false` 不删除、空目录重建、rollback 持锁；日志含 `check_then_rename` 时未 opt-in 拒绝、`--no-replace=check` 可回滚且用可移植指纹 |
 
 集成测试：
 
 * 用真实 `go build` 产物和 `--match=off` 在临时目录跑完整 `scan → plan → apply → rollback`。
 * 用伪造的 `mediadetect` 可执行文件（输出固定 JSON）覆盖 TMDB 匹配分支，避免测试依赖网络。
-* 新增 G6 的 Go 测试：`S01E01E02`、`S01E01E02E03` 的 `season_episode` 与 `title_candidates == ["Show"]`；`S01E01-E02` 行为不变；非连续 `S01E01E03`、`S01E01E02E04` 不匹配；`cmd/mediadetect/main_test.go` 的 `--version` 断言为 `0.2.1`。
+* 新增 G6 的 Go 测试：`S01E01E02`、`S01E01E02E03` 的 `season_episode` 与 `title_candidates == ["Show"]`；`S01E01-E02` 行为不变；非连续 `S01E01E03`、`S01E01E02E04` 不匹配；`cmd/mediadetect/main_test.go` 的 `--version` 断言为 `0.2.2`（G6 历史发布为 `0.2.1`）。
 * 可选人工冒烟：设置 `TMDB_API_KEY`，对一个真实下载目录执行 `scan/plan`，人工核对前 3 个电影目标名。
 
 验收矩阵：
@@ -976,11 +1038,18 @@ SPEC-001 影响与流程：
 | `S01E01E02` | CLI 修复后为 `tv_episode`；不查 TMDB；`title_candidates` 不含 `E02` |
 | 非连续 `S01E01E03` | 技能标记 `unsupported_multi_episode`，不查 TMDB |
 | 多分部 `Movie.CD1/CD2` | `unplanned/unsupported_multipart`，不拆目录、不猜 |
+| 普通标题含 `A`/`B` 或发行组 `PTH` | 不命中分卷规则，按普通电影匹配 |
+| `Part.1` 且 TMDB 标题含 `Part 1` | 按独立电影单元处理 |
+| `Part.1` 但 TMDB 无证明/标题不含 Part N | `unplanned/unsupported_multipart` |
+| `Movie.A`/`Movie.B` 主干末尾 | 硬分卷，`unplanned` |
 | 通用下载目录散落剧集 | 只有唯一 `(剧名, 年份)` 时生成单元；多剧名/多不同年份/无剧名 → `unplanned` |
 | CJK `第 N 集` + S02 | CJK 不进入 Season 02；保留原名或显式确认 Season 01 |
 | 目标已存在 | 预检失败，零文件改动 |
 | TOCTOU 目标出现 | no-replace 返回冲突，不覆盖 |
-| SMB/exFAT 不支持 no-replace | 能力探测失败，媒体文件零改动 |
+| SMB/exFAT 不支持 no-replace，默认 `strict` | 能力探测失败，媒体文件零改动，`E_NO_REPLACE_UNSUPPORTED` |
+| SMB 显式 `--no-replace=check` | check-then-rename 成功，目标存在不覆盖，结果/日志含 `non_atomic_move` |
+| check 模式 rollback 未显式 opt-in | `E_NO_REPLACE_UNSUPPORTED`，零改动 |
+| check 模式 size/mtime 或可移植子树指纹不符 | `E_NON_ATOMIC_MOVE_FAILED`/`E_ROLLBACK_CONFLICT`，保留现场 |
 | 扫描/计划阶段 | 媒体树元数据指纹不变（排除 `.media-title`） |
 | 第二次 apply 同一 unit | 跳过，不重复移动 |
 | 回滚两次 | 第一次恢复，第二次成功且不移动 |
@@ -1013,14 +1082,14 @@ SPEC-001 影响与流程：
   ```bash
   go build -o "$RUNNER_TEMP/mediadetect" ./cmd/mediadetect
   go test ./...
-  "$RUNNER_TEMP/mediadetect" --version | grep -q '"version":"0.2.1"'
+  "$RUNNER_TEMP/mediadetect" --version | grep -q '"version":"0.2.2"'
   MD_BIN="$RUNNER_TEMP/mediadetect" python3 -m py_compile skills/media-title/scripts/media_title.py
   MD_BIN="$RUNNER_TEMP/mediadetect" python3 -m unittest discover -s skills/media-title/tests -v
   ```
 * 集成测试通过 `MD_BIN` 使用刚构建的二进制；单元测试中的 TMDB 分支用伪造的 `mediadetect`，不访问网络。
 * G6 版本变更必须同步 SPEC-002 G4/G5 与 `cmd/mediadetect/main_test.go`；CI 的 `go test ./...` 和 `--version` grep 同时作为门禁，避免只改 `defaultVersion` 而测试仍断言 `0.2.0`。
 * 现有 Go `boundary` 步骤不受影响：`skills/` 下没有 Go 包，`go list ./...` 计数不变。
-* 技能版本 `0.1.0` 写在 `SKILL.md` 的 `metadata.version`；MediaDetect 因 G6 发布 `v0.2.1`。
+* 技能版本 `0.1.1` 写在 `SKILL.md` 的 `metadata.version`；MediaDetect 当前发布 `v0.2.2`（G6 历史发布为 `v0.2.1`）。
 * 发布物就是 `skills/media-title/` 目录；安装方式是复制或挂载到目标智能体的 skills 目录，不在仓库内写 Claude Code 专属安装器。
 
 ### 6.3 回滚
@@ -1088,11 +1157,11 @@ MediaDetect 的核心契约是只读检测；加入 `mv`/`mkdir` 会破坏零写
 * **CJK 集号无季号**：`第 N 集` 不含季信息，只能推断为 `Season 01` 或保持未整理。
 * **非连续多集**：`S01E01E03` 不被 CLI 修复覆盖，技能标记 `unsupported_multi_episode`，不自动命名。
 * **动漫绝对集号**：`[Group] Show - 12 [1080p].mkv` 可能被当作电影或无季集；v1 不专门处理。
-* **多版本/多分部**：v1 不自动归组；`CD1/CD2`、`Disc1/Disc2`、`Part.A/Part.B`、`Pt1/Pt2`、`1of2`、`上/下集` 等标记 `unplanned/unsupported_multipart`，由用户手工处理。
+* **多版本/多分部**：v1 不自动归组；`CD1/CD2`、`Disc1/Disc2`、`Part.A/Part.B`、`1of2`、`上/下集` 等硬分卷标记 `unplanned/unsupported_multipart`。`Part N` 仅在 TMDB 标题证明为独立电影时按单片处理（4.4.2.1），否则仍 unplanned。
 * **通用下载目录**：散落文件只有唯一 `(剧名, 年份)` 时才处理；多剧混放、同名不同年份或无法确定剧名时 `unplanned`。
 * **单集文件在已有 show 树内**：若 show/season 目录名不规范，v1 返回 `unplanned/needs_directory_mode`，要求扫描 show 目录；不在季目录内嵌套，也不把目标放到 root 外。
 * **一 session 一 plan**：重新计划必须开新 session；旧 session 的 state/日志保留用于回滚。
-* **no-replace 支持**：SMB/NFS/exFAT 等文件系统可能不支持 no-replace；按 `st_dev` 和文件/目录分别探测，任一失败时拒绝执行，不退回普通 `rename`。
+* **no-replace 支持**：SMB/NFS/exFAT 等文件系统可能不支持 no-replace；按 `st_dev` 和文件/目录分别探测。默认 `strict` 下任一失败即拒绝执行，不退回普通 `rename`。只有用户显式 `--no-replace=check`/环境变量时才允许非原子 check-then-rename，并承担检查与 rename 之间的竞态风险。
 * **崩溃恢复**：move/mkdir/remove_empty_dir 都有 intent 快照与对账；`done` 后 `state` 前崩溃可由下一次 apply 提升并继续。目录 inode/mtime 只能尽力恢复，`remove_empty_dir` 重建不保证原元数据。
 * **plan/session 完整性**：plan 被替换或删除时使用 `applied-plan.json`；session 目录被复制或移动时 `session_token`/`state_dir` 不匹配，拒绝 rollback。
 * **unplanned 可见性**：`plan.json` 与报告逐条列出 unplanned/skipped 及原因；这是有意的“少整理但不猜”。

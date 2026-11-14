@@ -8,6 +8,18 @@ updated_at: 2026-11-12
 
 # Changelog: SPEC-002 MediaDetect Go 包边界与工程结构
 
+## [2026-11-14] - v0.2.2 版本口径
+
+- **修改类型**: Changed
+- **影响范围**: 目标版本；§2.1 G4/G5；§4.9；§6.3/§6.4；§4.10；`tasks.md` 的 `spec_sha256`
+- **变更原因**: 完成 SPEC-004 T5 的 MediaDetect `v0.2.2` 发布收尾。按 CLAUDE.md，先把本 Spec 状态回退为 `In Review`、更新 `updated_at`、记录变更；修订后恢复 `Approved`。
+- **具体内容**:
+  - 目标版本、README/安装 tag/`defaultVersion`/CI 口径由 `0.2.1` 更新为 `0.2.2`。
+  - G5 明确唯一允许的行为差异是 SPEC-004 授权的硬年份封顶与 `match.year_conflict` warning；包边界和 JSON schema 不变。
+  - 发布/回滚说明同步为 `v0.2.2`，失败时发布 `v0.2.3`。
+  - 下游升级说明改为从 `v0.2.1` patch 升级到 `v0.2.2`。
+  - 重算 `tasks.md` 的 `spec_sha256`。
+
 ## [2026-11-12] - SPEC-003 G6 版本口径 0.2.1
 
 - **修改类型**: Changed

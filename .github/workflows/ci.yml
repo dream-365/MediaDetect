@@ -61,7 +61,7 @@ jobs:
           cd "$tmp"
           go mod init example.com/internal-probe
           go mod edit -replace "github.com/dream-365/MediaDetect=${GITHUB_WORKSPACE}"
-          go mod edit -require github.com/dream-365/MediaDetect@v0.2.1
+          go mod edit -require github.com/dream-365/MediaDetect@v0.2.2
 
           for pkg in collect llm; do
             printf '%s\n' 'package main' '' "import _ \"github.com/dream-365/MediaDetect/internal/${pkg}\"" '' 'func main() {}' > main.go
@@ -94,7 +94,7 @@ jobs:
           version=$("$RUNNER_TEMP/mediadetect" --version)
           printf '%s\n' "$version"
           case "$version" in
-            *'"version":"0.2.1"'*) ;;
+            *'"version":"0.2.2"'*) ;;
             *) echo "unexpected version output"; exit 1 ;;
           esac
       - name: py_compile

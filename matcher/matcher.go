@@ -4,6 +4,7 @@ package matcher
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 	"unicode"
@@ -82,10 +83,16 @@ func expandQueries(titles []string, limit int) []string {
 }
 
 // Result is the outcome for one file.
+type MatchWarning struct {
+	Code   string
+	Detail string
+}
+
 type Result struct {
 	Candidates []Scored // sorted by score, best first
 	Confidence string   // high | medium | low | unmatched
 	Margin     float64
+	Warnings   []MatchWarning
 }
 
 // Best returns the highest-scored candidate.
@@ -200,6 +207,7 @@ func (m *Matcher) Match(ctx context.Context, hints parser.Hints, runtimeSec int,
 	if probeFailed {
 		out.Confidence = downgrade(out.Confidence)
 	}
+	applyYearCap(&out, hints)
 	return out, nil
 }
 
@@ -352,6 +360,31 @@ func downgrade(c string) string {
 		return "low"
 	default:
 		return c
+	}
+}
+
+func applyYearCap(out *Result, hints parser.Hints) {
+	if len(out.Candidates) == 0 {
+		return
+	}
+	best := out.Candidates[0]
+	fileYear := primaryYear(hints.YearCandidates)
+	tmdbYear := best.Movie.Year()
+	if fileYear == 0 || tmdbYear == 0 {
+		return
+	}
+	delta := tmdbYear - fileYear
+	if abs(delta) <= 5 {
+		return
+	}
+	runtimeOK := best.RuntimeDelta != nil && abs(*best.RuntimeDelta) <= 180
+	out.Warnings = append(out.Warnings, MatchWarning{
+		Code: "match.year_conflict",
+		Detail: fmt.Sprintf("year_delta=%d file_year=%d tmdb_year=%d runtime_ok=%t",
+			delta, fileYear, tmdbYear, runtimeOK),
+	})
+	if !runtimeOK && out.Confidence != "unmatched" {
+		out.Confidence = "low"
 	}
 }
 

@@ -150,6 +150,9 @@ func buildMatch(ctx context.Context, res matcher.Result, file string, client *tm
 		File:       &file,
 		Candidates: []Candidate{},
 	}
+	for _, warning := range res.Warnings {
+		warnings.add(warning.Code, warning.Detail, &file)
+	}
 	if len(res.Candidates) == 0 {
 		return m
 	}
